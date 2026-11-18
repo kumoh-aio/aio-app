@@ -6,6 +6,9 @@ dist/
 *.apk
 *.aab
 
+# 빌드 때 만드는 아이콘 (tools/make-icons.mjs)
+web/assets/icons/*.png
+
 # 시크릿
 .env
 .env.*
