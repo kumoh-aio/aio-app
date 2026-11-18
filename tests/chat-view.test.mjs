@@ -123,8 +123,9 @@ function fakeStorage(initial = {}) {
   };
 }
 
-// 계약 모양의 가짜 기록 저장소: load() -> { sessionId, turns }, save(state) -> boolean, clear() -> boolean
-// chat-history처럼 질문 문자열이 message에 없는 차례는 저장하지 않고 버린다. 저장 내용은 load로 돌아온다.
+// v2 계약 모양의 가짜 기록 저장소: load() -> { sessionId, turns: [{ selectedVersion, versions }] },
+// save(state) -> boolean, clear() -> boolean. chat-history처럼 질문 문자열이 message에 없는 버전과
+// 버전이 하나도 남지 않은 차례는 버린다. 저장 내용은 load로 돌아온다.
 function fakeHistory({ initial = { sessionId: null, turns: [] }, saveResult = true, clearResult = true, load } = {}) {
   const calls = { saved: [], cleared: 0 };
   let stored = structuredClone(initial);
@@ -137,7 +138,11 @@ function fakeHistory({ initial = { sessionId: null, turns: [] }, saveResult = tr
     save(state) {
       const kept = {
         sessionId: state.sessionId ?? null,
-        turns: state.turns.filter((turn) => typeof turn?.message === "string" && turn.message.trim()),
+        turns: state.turns.map((turn) => ({
+          selectedVersion: turn?.selectedVersion,
+          versions: (Array.isArray(turn?.versions) ? turn.versions : [])
+            .filter((version) => typeof version?.message === "string" && version.message.trim()),
+        })).filter((turn) => turn.versions.length > 0),
       };
       calls.saved.push(structuredClone(kept));
       if (saveResult) stored = structuredClone(kept);
@@ -204,10 +209,11 @@ function mount({ storage = fakeStorage(), send = fakeSend().send, history = fake
     empty: () => root.find((n) => n.hasAttribute("data-chat-empty")),
     status: () => root.find((n) => n.hasAttribute("data-chat-status")),
     chips: () => root.findAll((n) => n.hasAttribute("data-chip")),
-    form: () => root.find((n) => n.tagName === "FORM"),
-    input: () => root.find((n) => n.tagName === "TEXTAREA"),
+    form: () => root.find((n) => n.tagName === "FORM" && !n.hasAttribute("data-edit-form")),
+    input: () => root.find((n) => n.getAttribute("id") === "chat-input"),
     submit: () => root.find((n) => n.hasAttribute("data-chat-submit")),
-    users: () => root.findAll((n) => n.getAttribute("data-turn") === "user"),
+    users: () => root.findAll((n) => n.hasAttribute("data-question")),
+    userItems: () => root.findAll((n) => n.getAttribute("data-turn") === "user"),
     cards: () => root.findAll((n) => n.hasAttribute("data-answer")),
     items: () => root.findAll((n) => n.getAttribute("data-turn") === "aio"),
   };
@@ -477,7 +483,7 @@ test("새 질문이 오면 앞선 요청을 취소하고 늦은 갱신은 버린
   assert.equal(part(firstItem, "data-answer").getAttribute("data-status"), "failed", "취소한 차례는 응답 중으로 남지 않는다");
   assert.equal(part(firstItem, "data-retry").hidden, false);
   assert.equal(part(secondItem, "data-answer-body").textContent, "새 답");
-  assert.deepEqual(history.calls.saved.at(-1).turns.map((t) => t.message), ["둘째 질문"]);
+  assert.deepEqual(history.calls.saved.at(-1).turns.map((t) => t.versions[t.selectedVersion].message), ["둘째 질문"]);
 });
 
 test("완료된 대화만 생각 원문 없이 저장하고, 복원 화면은 실시간 화면과 같다", async () => {
@@ -495,18 +501,23 @@ test("완료된 대화만 생각 원문 없이 저장하고, 복원 화면은 �
   const saved = history.calls.saved.at(-1);
   assert.equal(saved.sessionId, "virtual-session");
   assert.equal(saved.turns.length, 3, "질문은 계약대로 message에 담겨 버려지지 않는다");
-  assert.deepEqual(saved.turns.map((t) => t.message), ["가상 하나", "가상 둘", "가상 셋"]);
-  assert.ok(saved.turns.every((t) => !("question" in t)));
+  assert.deepEqual(saved.turns.map((t) => [t.selectedVersion, t.versions.length]), [[0, 1], [0, 1], [0, 1]]);
+  const versions = saved.turns.map((t) => t.versions[0]);
+  assert.deepEqual(versions.map((t) => t.message), ["가상 하나", "가상 둘", "가상 셋"]);
+  assert.ok(versions.every((t) => !("question" in t)));
   assert.deepEqual(history.stored, saved);
-  for (const turn of saved.turns) {
-    assert.equal("thinking" in turn, false, "생각 원문은 저장하지 않는다");
-    assert.equal(turn.status, "done");
-    assert.equal(turn.lang, "zh");
+  for (const version of versions) {
+    assert.equal("thinking" in version, false, "생각 원문은 저장하지 않는다");
+    assert.equal(version.status, "done");
+    assert.equal(version.lang, "zh");
+    assert.equal(version.sessionId, "virtual-session");
+    assert.deepEqual(Object.keys(version).sort(), ["answer", "answered", "citations", "guided", "lang", "latencyMs",
+      "message", "mode", "notice", "sessionId", "status", "thinkingLabel"]);
   }
-  assert.deepEqual(saved.turns.map((t) => t.mode), ["deep", "deep", "deep"]);
-  assert.equal(saved.turns[0].thinkingLabel, "3초 동안 생각함");
-  assert.equal(saved.turns[2].thinkingLabel, "思考了 2 秒");
-  assert.deepEqual(saved.turns[1].citations, []);
+  assert.deepEqual(versions.map((t) => t.mode), ["deep", "deep", "deep"]);
+  assert.equal(versions[0].thinkingLabel, "3초 동안 생각함");
+  assert.equal(versions[2].thinkingLabel, "思考了 2 秒");
+  assert.deepEqual(versions[1].citations, []);
 
   // 같은 기록 저장소로 앱을 다시 연다
   const restored = mount({ history });
@@ -529,7 +540,7 @@ test("완료된 대화만 생각 원문 없이 저장하고, 복원 화면은 �
     assert.deepEqual(strip(restoredItems[i], restored.part), strip(liveItems[i], live.part), `차례 ${i}`);
     const details = restored.part(restoredItems[i], "data-thinking");
     assert.equal(details.hidden, true, "복원 기록에는 생각 원문이 없다");
-    assert.equal(restored.part(restoredItems[i], "data-thinking-note").textContent, saved.turns[i].thinkingLabel);
+    assert.equal(restored.part(restoredItems[i], "data-thinking-note").textContent, versions[i].thinkingLabel);
   }
   assert.deepEqual(restored.q.users().map((u) => u.textContent), ["가상 하나", "가상 둘", "가상 셋"]);
 });
@@ -545,7 +556,8 @@ test("복원 기록은 요청 본문에 넣지 않고 세션만 잇는다", asyn
 });
 
 test("손상된 기록·불러오기 예외는 빈 화면으로 시작한다", () => {
-  for (const load of [() => { throw new Error("가상 손상"); }, () => null, () => ({ turns: "x" }), () => ({ turns: [null, { question: "" }] })]) {
+  for (const load of [() => { throw new Error("가상 손상"); }, () => null, () => ({ turns: "x" }), () => ({ turns: [null, { question: "" }] }),
+    () => ({ turns: [{ selectedVersion: 0, versions: [] }, { selectedVersion: 0, versions: [null, { message: "  " }] }] })]) {
     const { q } = mount({ history: fakeHistory({ load }) });
     assert.equal(q.empty().hidden, false);
     assert.equal(q.items().length, 0);
@@ -748,6 +760,250 @@ test("필수 주입값이 없으면 예외", () => {
   assert.throws(() => mountChat({ root: doc.createElement("div"), doc, send: async () => ({}) }), TypeError);
 });
 
+// ---- 수정·다시 답하기와 버전 넘기기 ----
+
+// 기록 v2 모양의 가상 버전
+function version(message, answer, extra = {}) {
+  return { message, mode: "fast", lang: "ko", status: "done", answer, thinkingLabel: "", citations: [], notice: "",
+    answered: true, guided: false, sessionId: "virtual-session", latencyMs: null, ...extra };
+}
+
+function controls(item, part) {
+  return {
+    edit: part(item, "data-edit"),
+    form: part(item, "data-edit-form"),
+    input: part(item, "data-edit-input"),
+    cancel: part(item, "data-edit-cancel"),
+    submit: part(item, "data-edit-submit"),
+    nav: part(item, "data-versions"),
+    prev: part(item, "data-version-prev"),
+    next: part(item, "data-version-next"),
+    label: part(item, "data-version-label"),
+  };
+}
+
+test("질문 수정은 같은 차례를 2/2로 만들고, 이전 버전 1/2는 질문·답·근거를 함께 되돌리며 다시 열어도 유지된다", async () => {
+  const queue = [
+    doneState({ answer: "가상 첫 답", citations: [CITE_OK] }),
+    doneState({ answer: "가상 아래 답", citations: [] }),
+    doneState({ answer: "가상 고친 답", citations: [] }),
+  ];
+  const { send, calls } = fakeSend(() => queue.shift());
+  const history = fakeHistory();
+  const { chat, q, part, root, doc } = mount({ send, history });
+  await chat.ask({ question: "가상 첫 질문" });
+  await chat.ask({ question: "가상 아래 질문" });
+
+  const [first] = q.userItems();
+  const c = controls(first, part);
+  assert.equal(c.edit.hidden, false);
+  assert.equal(c.nav.hidden, true, "버전이 하나면 넘기기를 숨긴다");
+
+  c.edit.dispatch("click");
+  assert.equal(c.form.hidden, false);
+  assert.equal(c.input.value, "가상 첫 질문");
+  assert.equal(doc.activeElement, c.input);
+  c.input.value = "  가상 고친 질문 ";
+  assert.ok(c.form.dispatch("submit").defaultPrevented);
+  await tick();
+
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].message, "가상 고친 질문");
+  assert.equal(calls[2].sessionId, "virtual-session", "수정 요청도 지금 세션으로 보낸다");
+  assert.equal(c.form.hidden, true);
+  assert.equal(q.items().length, 2, "차례를 새로 붙이지 않는다");
+  assert.deepEqual(q.users().map((u) => u.textContent), ["가상 고친 질문", "가상 아래 질문"]);
+  assert.equal(part(q.items()[0], "data-answer-body").textContent, "가상 고친 답");
+  assert.equal(part(q.items()[1], "data-answer-body").textContent, "가상 아래 답", "아래 차례는 그대로");
+  assert.equal(c.nav.hidden, false);
+  assert.equal(c.label.textContent, "2/2");
+  assert.equal(c.prev.getAttribute("aria-label"), TEXT.prevVersion);
+  assert.equal(c.next.getAttribute("aria-label"), TEXT.nextVersion);
+  assert.equal(c.next.disabled, true);
+  assert.equal(c.next.getAttribute("aria-disabled"), "true");
+  assert.equal(c.prev.disabled, false);
+  let saved = history.calls.saved.at(-1);
+  assert.deepEqual(saved.turns.map((t) => [t.selectedVersion, t.versions.map((v) => v.message)]),
+    [[1, ["가상 첫 질문", "가상 고친 질문"]], [0, ["가상 아래 질문"]]]);
+
+  c.prev.focus();
+  c.prev.dispatch("click");
+  assert.equal(calls.length, 3, "버전 이동은 요청을 보내지 않는다");
+  assert.equal(c.label.textContent, "1/2");
+  assert.equal(q.users()[0].textContent, "가상 첫 질문");
+  assert.equal(part(q.items()[0], "data-answer-body").textContent, "가상 첫 답");
+  assert.equal(root.findAll((n) => n.hasAttribute("data-citation")).length, 1, "당시 근거가 함께 돌아온다");
+  assert.equal(c.prev.disabled, true);
+  assert.equal(doc.activeElement, c.next, "막힌 버튼에서 반대쪽으로 포커스를 옮긴다");
+  saved = history.calls.saved.at(-1);
+  assert.equal(saved.turns[0].selectedVersion, 0);
+
+  const again = mount({ history });
+  const r = controls(again.q.userItems()[0], again.part);
+  assert.equal(r.label.textContent, "1/2");
+  assert.equal(again.q.users()[0].textContent, "가상 첫 질문");
+  assert.equal(again.part(again.q.items()[0], "data-answer-body").textContent, "가상 첫 답");
+  r.next.dispatch("click");
+  assert.equal(again.q.users()[0].textContent, "가상 고친 질문");
+  assert.equal(history.stored.turns[0].selectedVersion, 1);
+});
+
+test("빈 질문으로 고치면 보내지 않고, 취소·Esc는 원래 질문으로 닫는다", async () => {
+  const { send, calls } = fakeSend();
+  const { chat, q, part, doc } = mount({ send });
+  await chat.ask({ question: "가상 질문" });
+  const c = controls(q.userItems()[0], part);
+  c.edit.dispatch("click");
+  c.input.value = "   ";
+  c.form.dispatch("submit");
+  assert.equal(calls.length, 1);
+  assert.equal(c.input.getAttribute("aria-invalid"), "true");
+  c.cancel.dispatch("click");
+  assert.equal(c.form.hidden, true);
+  assert.equal(doc.activeElement, c.edit);
+  c.edit.dispatch("click");
+  for (const fn of c.input.listeners.get("keydown")) fn({ key: "Escape" });
+  assert.equal(c.form.hidden, true);
+  assert.equal(q.users()[0].textContent, "가상 질문");
+});
+
+test("다시 답하기는 같은 질문으로 새 버전을 쌓고 이전 답으로 되돌릴 수 있다", async () => {
+  const queue = [doneState({ answer: "가상 답 하나" }), doneState({ answer: "가상 답 둘", citations: [] })];
+  const { send, calls } = fakeSend(() => queue.shift());
+  const history = fakeHistory();
+  const { chat, q, part } = mount({ send, history });
+  await chat.ask({ question: "가상 질문", mode: "deep" });
+  const [item] = q.items();
+  part(item, "data-regenerate").dispatch("click");
+  await tick();
+  assert.equal(calls[1].message, "가상 질문");
+  const c = controls(q.userItems()[0], part);
+  assert.equal(c.label.textContent, "2/2");
+  assert.equal(part(item, "data-answer-body").textContent, "가상 답 둘");
+  c.prev.dispatch("click");
+  assert.equal(part(item, "data-answer-body").textContent, "가상 답 하나");
+  assert.equal(history.stored.turns[0].versions.length, 2);
+  assert.equal(history.stored.turns[0].selectedVersion, 0);
+});
+
+test("답을 받는 동안(스트리밍·대체 응답) 수정·다시 답하기·버전 이동을 막는다", async () => {
+  const initial = { sessionId: "virtual-session", turns: [
+    { selectedVersion: 1, versions: [version("가상 옛 질문", "가상 옛 답"), version("가상 고친 질문", "가상 고친 답")] },
+  ] };
+  const gate = deferred();
+  let update;
+  const calls = [];
+  const send = async (request) => {
+    calls.push(request);
+    update = request.onUpdate;
+    await gate.promise;
+    return doneState({ answer: "가상 새 답" });
+  };
+  const { chat, q, part, root } = mount({ send, history: fakeHistory({ initial }) });
+  const c = controls(q.userItems()[0], part);
+  const regen = part(q.items()[0], "data-regenerate");
+  assert.equal(c.label.textContent, "2/2");
+  c.edit.dispatch("click"); // 받기 전에 고치기를 열어 둔다
+  assert.equal(c.form.hidden, false);
+
+  const done = chat.ask({ question: "가상 새 질문" });
+  assert.equal(root.getAttribute("aria-busy"), "true");
+  for (const stage of ["streaming", "fallback"]) {
+    update({ status: stage, answer: "" });
+    for (const button of [c.edit, c.submit, c.prev, regen]) {
+      assert.equal(button.disabled, true, `${stage} ${button.getAttribute("data-edit") ?? ""}`);
+      assert.equal(button.getAttribute("aria-disabled"), "true");
+    }
+    // 막힌 버튼을 강제로 눌러도 처리기가 거른다
+    c.input.value = "가상 몰래 고친 질문";
+    c.form.dispatch("submit");
+    c.prev.dispatch("click");
+    regen.dispatch("click");
+    assert.equal(calls.length, 1);
+    assert.equal(c.label.textContent, "2/2");
+    assert.equal(q.users()[0].textContent, "가상 고친 질문");
+  }
+  const streamingCard = q.cards()[1];
+  assert.equal(streamingCard.getAttribute("aria-busy"), "true");
+  assert.equal(part(q.userItems()[1], "data-edit").hidden, true, "받는 중인 차례는 고칠 수 없다");
+
+  gate.resolve();
+  await done;
+  assert.equal(root.getAttribute("aria-busy"), "false");
+  for (const button of [c.edit, c.submit, c.prev, regen]) {
+    assert.equal(button.disabled, false);
+    assert.equal(button.hasAttribute("aria-disabled"), false);
+  }
+  assert.equal(c.next.disabled, true, "마지막 버전에서는 다음이 막혀 있다");
+});
+
+test("수정·다시 답하기가 실패하거나 취소되면 직전 완료 버전과 차례 순서가 그대로다", async () => {
+  const initial = { sessionId: "virtual-session", turns: [
+    { selectedVersion: 0, versions: [version("가상 질문 하나", "가상 답 하나", { citations: [CITE_OK] })] },
+    { selectedVersion: 0, versions: [version("가상 질문 둘", "가상 답 둘")] },
+  ] };
+  const gate = deferred();
+  const requests = [];
+  const send = async (request) => {
+    requests.push(request);
+    if (requests.length === 1) return { status: "failed", answer: "", citations: [], error: "가상 오류" };
+    if (requests.length === 2) {
+      request.onUpdate({ status: "streaming", answer: "가상 중간 답" });
+      await gate.promise;
+      request.onUpdate({ status: "streaming", answer: "가상 늦은 갱신" });
+      return doneState({ answer: "가상 늦은 답" });
+    }
+    return doneState({ answer: "가상 새 답" });
+  };
+  const history = fakeHistory({ initial });
+  const { chat, q, part } = mount({ send, history });
+
+  // 수정 실패: 고치기 전 질문·답·근거로 돌아간다
+  const c = controls(q.userItems()[0], part);
+  c.edit.dispatch("click");
+  c.input.value = "가상 고친 질문";
+  c.form.dispatch("submit");
+  await tick();
+  const first = q.items()[0];
+  assert.equal(q.users()[0].textContent, "가상 질문 하나");
+  assert.equal(part(first, "data-answer-body").textContent, "가상 답 하나");
+  assert.equal(part(first, "data-answer").getAttribute("data-status"), "done");
+  assert.equal(part(first, "data-retry").hidden, true);
+  assert.equal(part(first, "data-citations").hidden, false);
+  assert.equal(c.nav.hidden, true, "실패한 시도는 버전이 되지 않는다");
+  assert.equal(q.status().textContent, TEXT.failed);
+  assert.equal(history.calls.saved.length, 0);
+
+  // 다시 답하기 중 새 질문으로 취소: 받던 글자를 걷고 원래 답을 보여 준다. 늦은 갱신은 버린다.
+  const second = q.items()[1];
+  part(second, "data-regenerate").dispatch("click");
+  await tick();
+  assert.equal(part(second, "data-answer-body").textContent, "가상 중간 답");
+  await chat.ask({ question: "가상 질문 셋" });
+  assert.equal(requests[1].signal.aborted, true);
+  assert.equal(part(second, "data-answer-body").textContent, "가상 답 둘");
+  gate.resolve();
+  await tick();
+  await tick();
+  assert.equal(part(second, "data-answer-body").textContent, "가상 답 둘");
+  assert.deepEqual(q.users().map((u) => u.textContent), ["가상 질문 하나", "가상 질문 둘", "가상 질문 셋"]);
+  assert.deepEqual(history.stored.turns.map((t) => [t.selectedVersion, t.versions.length]), [[0, 1], [0, 1], [0, 1]]);
+});
+
+test("v2 기록 복원: 고른 버전을 지키고, 손상된 버전을 걸러 내면 고른 위치를 다시 맞춘다", () => {
+  const initial = { sessionId: null, turns: [
+    { selectedVersion: 2, versions: [version("가상 A", "가상 답 A"), { message: "" }, version("가상 C", "가상 답 C")] },
+    { selectedVersion: 1, versions: [version("가상 D", "가상 답 D"), null, version("가상 F", "가상 답 F")] },
+    { selectedVersion: 9, versions: [version("가상 G", "가상 답 G"), version("가상 H", "가상 답 H")] },
+    { selectedVersion: 0, versions: [version("가상 I", "가상 답 I", { mode: "deep", lang: "en" })] },
+  ] };
+  const { q, part } = mount({ history: fakeHistory({ initial }) });
+  assert.deepEqual(q.users().map((u) => u.textContent), ["가상 C", "가상 F", "가상 H", "가상 I"]);
+  const labels = q.userItems().map((item) => controls(item, part));
+  assert.deepEqual(labels.map((c) => [c.nav.hidden, c.label.textContent]),
+    [[false, "2/2"], [false, "2/2"], [false, "2/2"], [true, "1/1"]]);
+});
+
 // ---- 정적 파일 검사 ----
 
 test("chat-view.mjs는 innerHTML류와 외부 주소를 쓰지 않고 이름 규칙을 지킨다", () => {
@@ -780,12 +1036,22 @@ test("app.js는 takePendingAsk 없이 showView에서 chat.ask를 부르고 chat-
 test("app.css: 채팅 규칙은 포커스 규칙 앞에 있고 터치 영역은 44px 변수", () => {
   const css = read("../web/assets/app.css");
   const focusAt = css.lastIndexOf(":focus-visible");
-  for (const selector of [".chat-select", ".thinking-summary", ".chip", ".citation-link"]) {
+  for (const selector of [".chat-select", ".thinking-summary", ".chip", ".citation-link", ".version-step", ".chat-edit-input"]) {
     const at = css.indexOf(`${selector} {`);
     assert.ok(at > 0 && at < focusAt, selector);
     const body = css.slice(at, css.indexOf("}", at));
     assert.match(body, /min-height:\s*var\(--touch\)/, selector);
   }
+  // 수정·버전 넘기기 버튼은 44px 정사각 이상이고 컨트롤 경계선 토큰을 쓴다
+  const stepAt = css.search(/\.turn-action,\s*\.version-step \{/);
+  assert.ok(stepAt > 0 && stepAt < focusAt);
+  const step = css.slice(stepAt, css.indexOf("}", stepAt));
+  assert.match(step, /min-width:\s*var\(--touch\)/);
+  assert.match(step, /border:\s*1px solid var\(--color-control-border\)/);
+  assert.match(step, /color:\s*var\(--color-school-blue\)/);
+  const disabledAt = css.indexOf(".turn-action:disabled");
+  assert.ok(disabledAt > stepAt && disabledAt < focusAt);
+  assert.doesNotMatch(css.slice(disabledAt, css.indexOf("}", disabledAt)), /opacity/, "막힌 상태도 글자 대비를 지킨다");
   // 안내 답은 일반 말풍선: 공통 카드의 그림자와 굵은 왼쪽 강조선을 덮어쓴다
   const guidedAt = css.indexOf('.answer-card[data-guided="true"] {');
   assert.ok(guidedAt > css.indexOf(".answer-card {") && guidedAt > css.indexOf(".card {"), "카드 규칙 뒤에서 덮어쓴다");

@@ -61,7 +61,7 @@ function worker(scope = "https://example.invalid/app/") {
       clients: { claim: async () => { calls.claimed += 1; } } },
     caches: { open: async (name) => { calls.opened.push(name); return cache; },
       keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4",
-        "aio-shell-v5", "aio-shell-v6", "unrelated"],
+        "aio-shell-v5", "aio-shell-v6", "aio-shell-v7", "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
     fetch: async (request) => { calls.fetched.push(request); return "network"; },
   });
@@ -122,16 +122,17 @@ test("precache files exist or are generated icons", async () => {
   }
 });
 
-test("activate removes v5 and older app caches and keeps CACHE_NAME v6", async () => {
+test("activate removes v6 and older app caches and keeps CACHE_NAME v7", async () => {
   const { events, calls } = worker();
   let pending;
   events.install({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.opened, ["aio-shell-v6"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v7"]);
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
   assert.deepEqual(calls.deleted,
-    ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4", "aio-shell-v5"]);
+    ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4", "aio-shell-v5",
+      "aio-shell-v6"]);
   assert.equal(calls.claimed, 1);
 });
 

@@ -23,6 +23,14 @@ export const TEXT = Object.freeze({
   fallback: "연결이 불안정해 답을 다시 받는 중이에요.",
   failed: "답을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.",
   retry: "다시 묻기",
+  edit: "수정",
+  editLabel: "질문 수정",
+  editSubmit: "고쳐서 묻기",
+  editCancel: "취소",
+  regenerate: "다시 답하기",
+  versions: "질문·답변 버전",
+  prevVersion: "이전 버전",
+  nextVersion: "다음 버전",
   saveFailed: "이 기기에 대화를 저장하지 못했어요. 대화는 화면에만 남아요.",
   clearFailed: "이 기기에 저장된 대화를 지우지 못했어요. 잠시 뒤 다시 지워 주세요.",
   citationsTitle: "근거 조문",
@@ -164,7 +172,8 @@ function el(doc, tag, { className, text, attrs } = {}) {
  * @param {{ root: any, doc: any, storage?: Storage,
  *           send: (request: { message: string, mode: string, lang: string, sessionId: string|null,
  *                             signal: AbortSignal, onUpdate: (state: object) => void }) => Promise<object>,
- *           history: { load(): { sessionId: string|null, turns: object[] }, save(state: object): boolean, clear(): void } }} options
+ *           history: { load(): { sessionId: string|null, turns: { selectedVersion: number, versions: object[] }[] },
+ *                      save(state: object): boolean, clear(): void } }} options
  * @returns {{ ask(pending: { question: string, mode?: string }): Promise<object|null>, readonly busy: boolean }}
  */
 export function mountChat({ root, doc, storage, send, history }) {
@@ -176,7 +185,9 @@ export function mountChat({ root, doc, storage, send, history }) {
   let pickedHere = false; // 이 화면에서 사용자가 모드를 골랐는지
   let lang = readLang(storage);
   let sessionId = null;
-  let turns = []; // { question, mode, lang, state, view }
+  // 차례: { versions: 완료된 { question, mode, lang, state }[] (오래된 순), selected, pending, view }
+  // pending은 받는 중이거나, 완료 버전이 없는 차례에서 실패한 시도다. 화면은 pending이 있으면 그것을 그린다.
+  let turns = [];
   let active = null; // { controller, turn }
   const seen = new WeakSet();
 
@@ -315,6 +326,7 @@ export function mountChat({ root, doc, storage, send, history }) {
     submit.disabled = on;
     for (const button of chipButtons) button.disabled = on;
     root.setAttribute?.("aria-busy", on ? "true" : "false");
+    for (const turn of turns) paintControls(turn);
   }
 
   function paintEmpty() {
@@ -323,9 +335,34 @@ export function mountChat({ root, doc, storage, send, history }) {
 
   // ---- 한 차례 대화 ----
 
-  function createTurnView(question) {
+  function createTurnView() {
     const userItem = el(doc, "li", { className: "chat-item chat-user", attrs: { "data-turn": "user" } });
-    userItem.append(el(doc, "p", { className: "chat-bubble", text: question }));
+    const bubble = el(doc, "p", { className: "chat-bubble", attrs: { "data-question": "" } });
+
+    // 질문 고치기. 열면 말풍선 대신 입력칸을 보여 준다.
+    const editForm = el(doc, "form", { className: "chat-edit", attrs: { novalidate: "", "data-edit-form": "" } });
+    // 차례마다 id를 만들지 않도록 이름은 aria-label로 붙인다.
+    const editInput = el(doc, "textarea", {
+      className: "ask-input chat-edit-input",
+      attrs: { name: "message", rows: "2", "aria-label": TEXT.editLabel, "data-edit-input": "" },
+    });
+    const editRow = el(doc, "div", { className: "chat-edit-row" });
+    const editCancel = el(doc, "button", { className: "button-secondary", text: TEXT.editCancel, attrs: { type: "button", "data-edit-cancel": "" } });
+    const editSubmit = el(doc, "button", { className: "button-primary", text: TEXT.editSubmit, attrs: { type: "submit", "data-edit-submit": "" } });
+    editRow.append(editCancel, editSubmit);
+    editForm.append(editInput, editRow);
+    editForm.hidden = true;
+
+    // 수정 버튼과 "‹ n/m ›" 버전 넘기기
+    const actions = el(doc, "div", { className: "turn-actions", attrs: { "data-turn-actions": "" } });
+    const edit = el(doc, "button", { className: "turn-action", text: TEXT.edit, attrs: { type: "button", "data-edit": "" } });
+    const nav = el(doc, "div", { className: "version-nav", attrs: { role: "group", "aria-label": TEXT.versions, "data-versions": "" } });
+    const prev = el(doc, "button", { className: "version-step", text: "‹", attrs: { type: "button", "aria-label": TEXT.prevVersion, "data-version-prev": "" } });
+    const versionLabel = el(doc, "span", { className: "version-label", attrs: { "data-version-label": "" } });
+    const next = el(doc, "button", { className: "version-step", text: "›", attrs: { type: "button", "aria-label": TEXT.nextVersion, "data-version-next": "" } });
+    nav.append(prev, versionLabel, next);
+    actions.append(edit, nav);
+    userItem.append(bubble, editForm, actions);
 
     const aioItem = el(doc, "li", { className: "chat-item chat-aio", attrs: { "data-turn": "aio" } });
     const card = el(doc, "article", { className: "card answer-card", attrs: { "aria-label": TEXT.aio, "data-answer": "" } });
@@ -338,7 +375,10 @@ export function mountChat({ root, doc, storage, send, history }) {
     const notice = el(doc, "p", { className: "answer-notice", attrs: { "data-notice": "" } });
     const turnStatus = el(doc, "p", { className: "answer-status", attrs: { "data-answer-status": "" } });
     const retry = el(doc, "button", { className: "button-secondary", text: TEXT.retry, attrs: { type: "button", "data-retry": "" } });
-    card.append(thinking, thinkingNote, answer, notice, turnStatus, retry);
+    const regenerate = el(doc, "button", { className: "button-secondary", text: TEXT.regenerate, attrs: { type: "button", "data-regenerate": "" } });
+    const answerActions = el(doc, "div", { className: "answer-actions" });
+    answerActions.append(retry, regenerate);
+    card.append(thinking, thinkingNote, answer, notice, turnStatus, answerActions);
 
     const citeSection = el(doc, "section", { className: "citations", attrs: { "data-citations": "" } });
     const citeTitle = el(doc, "h3", { className: "citations-title", text: TEXT.citationsTitle });
@@ -346,10 +386,78 @@ export function mountChat({ root, doc, storage, send, history }) {
     citeSection.append(citeTitle, citeList);
     aioItem.append(card, citeSection);
 
-    return { userItem, aioItem, card, thinking, thinkingSummary, thinkingBody, thinkingNote, answer, notice, turnStatus, retry, citeSection, citeList };
+    return {
+      userItem, bubble, editForm, editInput, editCancel, editSubmit, actions, edit, nav, prev, versionLabel, next,
+      aioItem, card, thinking, thinkingSummary, thinkingBody, thinkingNote, answer, notice, turnStatus, retry, regenerate,
+      citeSection, citeList,
+    };
   }
 
-  function paintTurn(view, state) {
+  // 지금 그릴 시도: 받는 중이거나 실패한 시도가 있으면 그것, 아니면 고른 완료 버전.
+  const shown = (turn) => turn.pending ?? turn.versions[turn.selected];
+
+  function paintTurn(turn) {
+    const { view } = turn;
+    const attempt = shown(turn);
+    view.bubble.textContent = attempt.question;
+    paintAnswer(view, attempt.state);
+    paintControls(turn);
+  }
+
+  // 답을 받는 동안에는 차례 조작을 모두 막는다. 처리기에서도 active를 한 번 더 거른다.
+  function paintControls(turn) {
+    const { view } = turn;
+    const busy = active !== null;
+    const settled = !turn.pending && turn.versions.length > 0;
+    const count = turn.versions.length;
+    view.edit.hidden = !settled;
+    view.regenerate.hidden = !settled;
+    view.nav.hidden = !settled || count < 2;
+    view.versionLabel.textContent = `${turn.selected + 1}/${count}`;
+    lock(view.edit, busy);
+    lock(view.regenerate, busy);
+    lock(view.retry, busy);
+    lock(view.editSubmit, busy);
+    lock(view.prev, busy || turn.selected <= 0);
+    lock(view.next, busy || turn.selected >= count - 1);
+    if (!settled) closeEditor(turn, false);
+  }
+
+  function lock(button, on) {
+    button.disabled = on;
+    if (on) button.setAttribute("aria-disabled", "true");
+    else button.removeAttribute("aria-disabled");
+  }
+
+  function openEditor(turn) {
+    if (active || turn.pending) return;
+    const { view } = turn;
+    view.editInput.value = shown(turn).question;
+    view.editInput.removeAttribute("aria-invalid");
+    view.editForm.hidden = false;
+    view.bubble.hidden = true;
+    view.actions.hidden = true;
+    view.editInput.focus();
+  }
+
+  function closeEditor(turn, refocus) {
+    const { view } = turn;
+    if (view.editForm.hidden) return;
+    view.editForm.hidden = true;
+    view.bubble.hidden = false;
+    view.actions.hidden = false;
+    if (refocus) view.edit.focus();
+  }
+
+  function selectVersion(turn, index) {
+    if (active || turn.pending || index < 0 || index >= turn.versions.length || index === turn.selected) return;
+    turn.selected = index;
+    closeEditor(turn, false);
+    paintTurn(turn);
+    persist(); // 요청은 보내지 않고 고른 버전만 저장한다
+  }
+
+  function paintAnswer(view, state) {
     view.card.setAttribute("data-status", state.status);
     view.card.setAttribute("data-guided", state.guided ? "true" : "false");
     view.card.setAttribute("aria-busy", state.status === "streaming" || state.status === "fallback" ? "true" : "false");
@@ -378,17 +486,49 @@ export function mountChat({ root, doc, storage, send, history }) {
     view.citeSection.hidden = state.citations.length === 0;
   }
 
-  function addTurn(question, turnMode, turnLang, state) {
-    const view = createTurnView(question);
-    const turn = { question, mode: turnMode, lang: turnLang, state, view };
+  // versions가 비어 있으면 pending을 하나 받아 새 시도로 시작한다.
+  function addTurn({ versions = [], selected = versions.length - 1, pending = null }) {
+    const view = createTurnView();
+    const turn = { versions, selected, pending, view };
+
+    // 완료 버전이 없는 차례의 다시 묻기: 그 차례를 지우고 대화 끝에서 다시 묻는다.
     view.retry.addEventListener("click", () => {
-      if (active) return;
+      if (active || !turn.pending) return;
+      const { question, mode: turnMode, lang: turnLang } = turn.pending;
       removeTurn(turn);
       run(question, turnMode, turnLang);
     });
+    view.edit.addEventListener("click", () => openEditor(turn));
+    view.editCancel.addEventListener("click", () => closeEditor(turn, true));
+    view.editInput.addEventListener("keydown", (event) => {
+      if (event?.key === "Escape") closeEditor(turn, true);
+    });
+    view.editForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (active || turn.pending) return;
+      const question = normalizeQuestion(view.editInput.value);
+      if (!question) {
+        view.editInput.setAttribute("aria-invalid", "true");
+        view.editInput.focus();
+        return;
+      }
+      closeEditor(turn, false);
+      run(question, syncMode(), lang, turn);
+    });
+    view.regenerate.addEventListener("click", () => {
+      if (active || turn.pending) return;
+      run(shown(turn).question, syncMode(), lang, turn);
+    });
+    const step = (delta, from, to) => {
+      selectVersion(turn, turn.selected + delta);
+      if (from.disabled) to.focus(); // 끝에 닿아 버튼이 막히면 반대쪽으로 포커스를 옮긴다
+    };
+    view.prev.addEventListener("click", () => step(-1, view.prev, view.next));
+    view.next.addEventListener("click", () => step(1, view.next, view.prev));
+
     turns.push(turn);
     log.append(view.userItem, view.aioItem);
-    paintTurn(view, state);
+    paintTurn(turn);
     paintEmpty();
     return turn;
   }
@@ -403,44 +543,61 @@ export function mountChat({ root, doc, storage, send, history }) {
     paintEmpty();
   }
 
-  function persist() {
-    // chat-history 계약은 질문을 message로 받는다(요청 본문과 같은 이름).
-    const saved = turns.filter((t) => t.state.status === "done").map((t) => ({
-      message: t.question,
-      mode: t.mode,
-      lang: t.lang,
+  // chat-history v2 계약: 차례마다 { selectedVersion, versions: [snapshot] }. 질문은 message로 담는다.
+  function snapshot({ question, mode: turnMode, lang: turnLang, state }) {
+    return {
+      message: question,
+      mode: turnMode,
+      lang: turnLang,
       status: "done",
-      answer: t.state.answer,
-      thinkingLabel: t.state.thinkingLabel || (t.state.latencyMs ? thinkingTitle(t.state) : ""),
-      citations: t.state.citations,
-      notice: t.state.notice,
-      answered: t.state.answered,
-      guided: t.state.guided,
-      latencyMs: t.state.latencyMs,
+      answer: state.answer,
+      thinkingLabel: state.thinkingLabel || (state.latencyMs ? thinkingTitle(state) : ""),
+      citations: state.citations,
+      notice: state.notice,
+      answered: state.answered,
+      guided: state.guided,
+      sessionId: state.sessionId,
+      latencyMs: state.latencyMs,
+    };
+  }
+
+  function persist() {
+    const saved = turns.filter((t) => t.versions.length > 0).map((t) => ({
+      selectedVersion: t.selected,
+      versions: t.versions.map(snapshot),
     }));
     const ok = tryHistory(() => history.save({ sessionId, turns: saved }));
     if (!ok) setStatus(TEXT.saveFailed, "save-failed");
     return ok;
   }
 
-  async function run(question, turnMode, turnLang = lang) {
+  // target이 있으면 그 차례에 새 버전을 받는다(수정·다시 답하기). 없으면 대화 끝에 새 차례를 붙인다.
+  async function run(question, turnMode, turnLang = lang, target = null) {
     // 요청을 시작할 때 모드·언어를 고정한다.
     const fixedMode = MODES.includes(turnMode) ? turnMode : mode;
     const fixedLang = LANGS.includes(turnLang) ? turnLang : lang;
     cancelActive();
     const controller = new AbortController();
-    const turn = addTurn(question, fixedMode, fixedLang, normalizeState({ status: "streaming" }));
-    const mine = { controller, turn };
+    const attempt = { question, mode: fixedMode, lang: fixedLang, state: normalizeState({ status: "streaming" }) };
+    let turn = target && turns.includes(target) ? target : null;
+    const mine = { controller, turn: null };
     active = mine;
+    if (turn) {
+      turn.pending = attempt;
+      paintTurn(turn);
+    } else {
+      turn = addTurn({ pending: attempt });
+    }
+    mine.turn = turn;
     setBusy(true);
     setStatus(TEXT.streaming, "streaming");
     turn.view.aioItem.scrollIntoView?.({ block: "nearest" });
 
     const update = (raw) => {
       if (active !== mine) return; // 취소되었거나 지워진 대화
-      turn.state = normalizeState(raw);
-      paintTurn(turn.view, turn.state);
-      if (turn.state.status === "fallback") setStatus(TEXT.fallback, "fallback");
+      attempt.state = normalizeState(raw);
+      paintTurn(turn);
+      if (attempt.state.status === "fallback") setStatus(TEXT.fallback, "fallback");
     };
 
     let result;
@@ -449,30 +606,49 @@ export function mountChat({ root, doc, storage, send, history }) {
     } catch (error) {
       result = { status: "failed", error: controller.signal.aborted ? "aborted" : String(error?.message ?? error) };
     }
-    if (active !== mine) return turn.state;
+    if (active !== mine) return attempt.state;
     active = null;
     if (controller.signal.aborted && result?.status !== "done") result = { ...result, status: "failed", error: "aborted" };
-    turn.state = normalizeState(result);
-    paintTurn(turn.view, turn.state);
+    attempt.state = normalizeState(result);
+    if (attempt.state.status === "done") {
+      turn.versions.push(attempt);
+      turn.selected = turn.versions.length - 1;
+      turn.pending = null;
+    } else {
+      settleFailed(turn, attempt);
+    }
+    paintTurn(turn);
     setBusy(false);
-    if (turn.state.status === "done") {
-      if (turn.state.sessionId) sessionId = turn.state.sessionId;
+    if (attempt.state.status === "done") {
+      if (attempt.state.sessionId) sessionId = attempt.state.sessionId;
       setStatus("", "done");
       persist();
     } else {
       setStatus(TEXT.failed, "failed");
     }
-    return turn.state;
+    return attempt.state;
   }
 
-  // 진행 중인 요청을 취소하고 그 차례를 실패로 표시한다. 늦게 온 갱신은 run이 버린다.
+  // 실패·취소한 시도: 완료 버전이 있으면 버리고 고른 버전을 다시 보여 주고, 없으면 실패로 남겨 다시 묻기를 띄운다.
+  function settleFailed(turn, attempt) {
+    if (turn.versions.length > 0) {
+      turn.pending = null;
+    } else {
+      attempt.state = normalizeState({ ...attempt.state, status: "failed", error: attempt.state.error || "aborted" });
+      turn.pending = attempt;
+    }
+  }
+
+  // 진행 중인 요청을 취소한다. 늦게 온 갱신은 run이 버린다.
   function cancelActive() {
     if (!active) return;
     const { controller, turn } = active;
     active = null;
     controller.abort();
-    turn.state = normalizeState({ ...turn.state, status: "failed", error: "aborted" });
-    paintTurn(turn.view, turn.state);
+    if (turn?.pending) {
+      settleFailed(turn, turn.pending);
+      paintTurn(turn);
+    }
     setBusy(false);
   }
 
@@ -512,12 +688,33 @@ export function mountChat({ root, doc, storage, send, history }) {
     if (!saved || !Array.isArray(saved.turns)) return;
     sessionId = typeof saved.sessionId === "string" && saved.sessionId ? saved.sessionId : null;
     for (const item of saved.turns) {
-      const question = normalizeQuestion(item?.message ?? item?.question);
-      if (!question) continue;
-      const state = normalizeState({ ...item, status: "done", thinking: "" });
-      addTurn(question, MODES.includes(item.mode) ? item.mode : mode, LANGS.includes(item.lang) ? item.lang : lang, state);
+      // v2 차례는 versions를 갖는다. versions가 없는 예전 모양은 버전 하나짜리 차례로 읽는다.
+      const raw = Array.isArray(item?.versions) ? item.versions : [item];
+      const kept = [];
+      let selected = -1;
+      raw.forEach((entry, index) => {
+        const version = restoreVersion(entry);
+        if (!version) return;
+        if (index === item?.selectedVersion) selected = kept.length;
+        kept.push(version);
+      });
+      if (!kept.length) continue;
+      // 고른 버전이 걸러졌거나 값이 잘못됐으면 가장 최근 버전을 고른다.
+      addTurn({ versions: kept, selected: selected >= 0 ? selected : kept.length - 1 });
     }
     if (turns.length) setStatus(TEXT.restored, "restored");
+  }
+
+  function restoreVersion(entry) {
+    if (!entry || typeof entry !== "object") return null;
+    const question = normalizeQuestion(entry.message ?? entry.question);
+    if (!question) return null;
+    return {
+      question,
+      mode: MODES.includes(entry.mode) ? entry.mode : mode,
+      lang: LANGS.includes(entry.lang) ? entry.lang : lang,
+      state: normalizeState({ ...entry, status: "done", thinking: "" }),
+    };
   }
 
   setMode(mode, false);
