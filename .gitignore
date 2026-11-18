@@ -1,0 +1,20 @@
+# 의존성과 빌드 결과
+node_modules/
+android/
+ios/
+dist/
+*.apk
+*.aab
+
+# 시크릿
+.env
+.env.*
+*.keystore
+*.jks
+*.pem
+
+# 편집기·OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
