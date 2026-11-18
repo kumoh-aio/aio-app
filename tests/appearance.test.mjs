@@ -431,8 +431,12 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
   for (const selector of [".qa-blob", '.qa-ring[data-open="true"] .qa-blob']) {
     assert.doesNotMatch(rule(selector), /--qa-origin/, `${selector}는 원점을 다시 더하지 않는다`);
   }
-  // 가운데 원은 이동량을 0으로 고정해 열린 동안 트리거 중심에 남고, 버블을 + 자리에 잇는다.
-  assert.match(rule(".qa-blob[data-qa-hub]"), /--qa-x:\s*0px;\s*--qa-y:\s*0px;/);
+  // 채움 원은 버블마다 하나다. 진입점이 만들지 않는 가운데 원 규칙을 남기면 설계와 화면이 어긋난다.
+  assert.doesNotMatch(css, /data-qa-hub/, "가운데 원 규칙을 두지 않는다");
+  const design = readFileSync(new URL("../docs/DESIGN.md", import.meta.url), "utf8");
+  const ringDoc = design.slice(design.indexOf("## 아이오 빠른 실행 링"));
+  assert.ok(ringDoc.length > 0 && design.includes("## 아이오 빠른 실행 링"), "설계 절");
+  assert.doesNotMatch(ringDoc, /data-qa-hub|가운데 원 1개|버블 수보다 하나 많다/, "설계도 버블마다 채움 원 하나");
   assert.match(rule('.qa-ring[data-open="true"] .qa-item'), /pointer-events:\s*auto/);
 
   const label = rule(".qa-label");

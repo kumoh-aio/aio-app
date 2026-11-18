@@ -1549,7 +1549,7 @@ html[data-theme="neumorphic"] :is(
    채움(.qa-blob)은 버튼과 똑같이 --qa-x·--qa-y만큼만 움직이고 원점을 다시 더하지 않는다.
    SVG 크기는 innerWidth·innerHeight와 같은 100vw·100dvh로 둔다. 100%(inset: 0)는 세로 스크롤바를 빼므로
    viewBox 폭과 어긋나 채움이 축소된다. 가장 확실한 viewBox 크기는 SVG 자신의 getBoundingClientRect()다.
-   가운데 원(.qa-blob[data-qa-hub])은 + 자리에 남아 버블을 트리거에 잇는다. */
+   채움 원은 버블마다 하나씩이고 트리거 자리에 남는 원은 두지 않는다. */
    goo 필터는 index.html의 #aio-goo를 SVG <g filter> 속성으로 걸고, 글자와 아이콘은 필터 밖 .qa-items에 둔다. */
 .qa-defs {
   position: absolute;
@@ -1602,11 +1602,6 @@ html[data-theme="neumorphic"] :is(
   fill: var(--color-school-blue);
   transform: translate(0px, 0px) scale(0.4);
   transition: transform var(--qa-duration) var(--qa-ease);
-}
-
-.qa-blob[data-qa-hub] {
-  --qa-x: 0px;
-  --qa-y: 0px;
 }
 
 .qa-item {
