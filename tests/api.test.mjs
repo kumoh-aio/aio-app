@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApi, requestJson, HANDWRITING_MAX_BYTES } from "../web/assets/api.mjs";
+import { createApi, requestJson, HANDWRITING_MAX_BYTES, isPngStructure } from "../web/assets/api.mjs";
 import { API_BASE } from "../web/assets/config.mjs";
 
 test("health uses the fixed API and omits credentials and caches", async () => {
@@ -128,13 +128,28 @@ test("JSON body is serialized with content type and preserves HTTP status", asyn
 
 // ---- 손글씨 인식 ----
 
-const PNG_HEAD = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
-// 서명만 맞춘 가상 PNG. size를 주면 그 길이로 채운다.
-const png = (size = 16, type = "image/png") => {
-  const bytes = new Uint8Array(size);
-  bytes.set(PNG_HEAD.slice(0, size));
-  return new Blob([bytes], { type });
+const PNG_HEAD = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+// 가상 PNG 청크: 길이 4바이트, 형식 4바이트, 데이터, CRC 자리 4바이트(앱은 CRC를 보지 않는다).
+const chunk = (type, data = new Uint8Array(0), length = data.length) => {
+  const bytes = new Uint8Array(12 + data.length);
+  new DataView(bytes.buffer).setUint32(0, length);
+  for (let i = 0; i < 4; i += 1) bytes[4 + i] = type.charCodeAt(i);
+  bytes.set(data, 8);
+  return bytes;
 };
+const ihdr = (width = 1, height = 1) => {
+  const data = new Uint8Array(13);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, width);
+  view.setUint32(4, height);
+  data[8] = 8; // 비트 깊이
+  return chunk("IHDR", data);
+};
+const IEND = chunk("IEND");
+const pngOf = (parts, type = "image/png") => new Blob([PNG_HEAD, ...parts], { type });
+const PNG_OVERHEAD = PNG_HEAD.length + 25 + 12 + 12; // 서명 + IHDR + 빈 IDAT + IEND
+// 구조가 맞는 가상 PNG. size를 주면 IDAT 데이터 길이로 맞춘다.
+const png = (size = 64, type = "image/png") => pngOf([ihdr(), chunk("IDAT", new Uint8Array(size - PNG_OVERHEAD)), IEND], type);
 
 function handwritingApi(respond) {
   const calls = [];
@@ -208,13 +223,45 @@ test("handwriting network failure is not retried", async () => {
 
 test("handwriting rejects non-PNG and oversized images before fetch", async () => {
   const { api, calls } = handwritingApi(() => assert.fail("요청하면 안 된다"));
-  for (const image of [undefined, null, "data:image/png;base64,", { type: "image/png", size: 10 },
-    png(16, "image/jpeg"), png(16, ""), new Blob([new Uint8Array(16)], { type: "image/png" }), png(4)]) {
-    await assert.rejects(api.handwriting({ image }), { status: 415 });
+  const idat = chunk("IDAT", new Uint8Array(4));
+  const zeroFilled = new Uint8Array(64);
+  zeroFilled.set(PNG_HEAD);
+  const invalid = {
+    "not a blob": [undefined, null, "data:image/png;base64,", { type: "image/png", size: 10 }],
+    "wrong MIME": [png(64, "image/jpeg"), png(64, "")],
+    "bad signature": [new Blob([new Uint8Array(64)], { type: "image/png" }), new Blob([PNG_HEAD.slice(0, 4)], { type: "image/png" })],
+    "signature only": [pngOf([])],
+    "signature then zeros": [new Blob([zeroFilled], { type: "image/png" })],
+    "first chunk not IHDR": [pngOf([idat, IEND])],
+    "IHDR wrong length": [pngOf([chunk("IHDR", new Uint8Array(12)), idat, IEND])],
+    "zero width or height": [pngOf([ihdr(0, 1), idat, IEND]), pngOf([ihdr(1, 0), idat, IEND])],
+    "second IHDR": [pngOf([ihdr(), ihdr(), idat, IEND])],
+    "no IDAT": [pngOf([ihdr(), IEND])],
+    "no IEND": [pngOf([ihdr(), idat])],
+    "IEND with data": [pngOf([ihdr(), idat, chunk("IEND", new Uint8Array(1))])],
+    "bytes after IEND": [pngOf([ihdr(), idat, IEND, new Uint8Array(1)])],
+    "chunk longer than file": [pngOf([ihdr(), chunk("IDAT", new Uint8Array(4), 100), IEND])],
+  };
+  for (const [name, images] of Object.entries(invalid)) {
+    for (const image of images) await assert.rejects(api.handwriting({ image }), { status: 415 }, name);
   }
   await assert.rejects(api.handwriting({ image: png(HANDWRITING_MAX_BYTES + 1) }), { status: 413 });
   assert.equal(calls.length, 0);
   assert.equal(HANDWRITING_MAX_BYTES, 2000000);
+});
+
+test("isPngStructure accepts IHDR, IDAT and IEND in order, also inside a larger buffer", async () => {
+  const bytes = new Uint8Array(await png(80).arrayBuffer());
+  assert.equal(isPngStructure(bytes), true);
+  const padded = new Uint8Array(bytes.length + 6);
+  padded.set(bytes, 3);
+  assert.equal(isPngStructure(padded.subarray(3, 3 + bytes.length)), true, "byteOffset이 있어도 읽는다");
+  const split = new Uint8Array(await pngOf([ihdr(), chunk("tEXt", new Uint8Array(3)), chunk("IDAT", new Uint8Array(2)),
+    chunk("IDAT", new Uint8Array(2)), IEND]).arrayBuffer());
+  assert.equal(isPngStructure(split), true, "보조 청크와 여러 IDAT 허용");
+  assert.equal(isPngStructure(bytes.subarray(0, bytes.length - 1)), false);
+  assert.equal(isPngStructure(PNG_HEAD), false);
+  assert.equal(isPngStructure([...bytes]), false, "Uint8Array만 받는다");
 });
 
 test("handwriting accepts an image of exactly 2,000,000 bytes", async () => {

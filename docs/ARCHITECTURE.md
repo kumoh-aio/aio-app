@@ -39,7 +39,7 @@ aio-app/
 | 층 | 계약 |
 | --- | --- |
 | API | `createApi().handwriting({ image, lang, signal })` → `Promise<string>`. `FormData`에 `image`(파일 이름 `handwriting.png`)와 `lang`(ko·en·zh일 때만)을 담고 `Content-Type`은 지정하지 않는다. `credentials: "omit"`, `cache: "no-store"`, 자동 재시도 없음, 제한 시간 90초와 호출자 `signal`을 함께 따른다 |
-| 사전 거부 | PNG가 아니면(MIME 형식이나 서명 8바이트가 다르면) 415, 2,000,000바이트를 넘으면 413 오류로 요청 없이 거부한다 |
+| 사전 거부 | 2,000,000바이트를 넘으면 413, PNG 구조가 아니면 415 오류로 요청 없이 거부한다. 구조 검사(`isPngStructure`)는 MIME 형식 `image/png`, 서명 8바이트, 첫 청크 IHDR(길이 13, 가로·세로 0 초과), IDAT 한 개 이상, 파일 끝과 맞는 IEND(길이 0)를 본다. 청크가 파일을 넘거나 IEND 뒤에 바이트가 남아도 거부한다. CRC는 서버가 디코딩할 때 확인한다 |
 | 실패 | HTTP 오류는 `error.status`에 상태 코드만 담고 서버 본문 문구는 쓰지 않는다. 200인데 문자열 `text`가 없거나 공백뿐이면 422로 다룬다. 중단은 `AbortError`, 제한 시간은 `TimeoutError`, 네트워크 오류는 `TypeError`이며 `status`가 없다 |
 | 화면 문구 | 400·413·415 크기·형식, 422 읽을 글씨 없음, 503 사용 불가, 나머지는 일반 오류 |
 | 패드 | `createHandwritingPad({ doc, recognize })` → `open({ trigger, lang, onInsert })`, `close()`. `recognize({ image, lang, signal })`는 위 API를 감싼다 |

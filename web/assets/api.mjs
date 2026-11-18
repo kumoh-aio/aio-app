@@ -65,13 +65,44 @@ function statusError(status) {
   return error;
 }
 
-// 형식은 MIME 형식과 PNG 서명 8바이트를 함께 본다. 맞지 않으면 415, 크면 413.
+const chunkType = (bytes, at) => String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]);
+
+/**
+ * PNG 구조를 확인한다: 서명 8바이트, 첫 청크 IHDR(길이 13, 가로·세로 0 초과),
+ * IDAT 한 개 이상, 마지막 청크 IEND(길이 0)가 파일 끝과 정확히 맞아야 한다.
+ * 청크 길이가 파일을 넘거나 IEND 뒤에 바이트가 남으면 거부한다. CRC는 서버가 디코딩할 때 확인한다.
+ */
+export function isPngStructure(bytes) {
+  if (!(bytes instanceof Uint8Array) || bytes.length < PNG_SIGNATURE.length) return false;
+  if (PNG_SIGNATURE.some((byte, index) => bytes[index] !== byte)) return false;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  let at = PNG_SIGNATURE.length;
+  let index = 0;
+  let sawData = false;
+  while (at + 12 <= bytes.length) {
+    const length = view.getUint32(at);
+    const type = chunkType(bytes, at + 4);
+    const end = at + 12 + length;
+    if (end > bytes.length) return false;
+    if (index === 0) {
+      if (type !== "IHDR" || length !== 13) return false;
+      if (view.getUint32(at + 8) === 0 || view.getUint32(at + 12) === 0) return false;
+    } else if (type === "IHDR") {
+      return false;
+    }
+    if (type === "IDAT") sawData = true;
+    if (type === "IEND") return length === 0 && sawData && end === bytes.length;
+    at = end;
+    index += 1;
+  }
+  return false; // IEND 없이 끝났거나 마지막 청크가 잘렸다
+}
+
+// 형식이 맞지 않으면 415, 크면 413. 크기를 먼저 보고 2,000,000바이트 이하일 때만 내용을 읽는다.
 async function checkPng(image) {
   if (typeof Blob === "undefined" || !(image instanceof Blob) || image.type !== "image/png") throw statusError(415);
   if (image.size > HANDWRITING_MAX_BYTES) throw statusError(413);
-  if (image.size < PNG_SIGNATURE.length) throw statusError(415);
-  const head = new Uint8Array(await image.slice(0, PNG_SIGNATURE.length).arrayBuffer());
-  if (PNG_SIGNATURE.some((byte, index) => head[index] !== byte)) throw statusError(415);
+  if (!isPngStructure(new Uint8Array(await image.arrayBuffer()))) throw statusError(415);
 }
 
 /**
