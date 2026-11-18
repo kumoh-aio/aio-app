@@ -1,5 +1,6 @@
 import { requestJson, secureUrl } from "./api.mjs";
 import { API_BASE } from "./config.mjs";
+import { validDate, eventEnd, classifyEvent, layoutMonth, moveDate } from "./calendar-grid.mjs";
 
 export const TEXT = Object.freeze({
   idle: "학년도와 학기를 골라 학사일정을 확인하세요.",
@@ -9,20 +10,12 @@ export const TEXT = Object.freeze({
   retry: "다시 시도",
 });
 
-// 날짜를 시간대로 변환하지 않고 ISO 달력 날짜의 형식과 일수를 확인한다.
-function validDate(value) {
-  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
-  const [year, month, day] = value.split("-").map(Number);
-  const leap = year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0);
-  const days = [31, leap ? 29 : 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
-  return month >= 1 && month <= 12 && day >= 1 && day <= days[month - 1];
-}
-
 const text = (value) => typeof value === "string" ? value : "";
 
 export function mountCalendar({
   root, doc = root?.ownerDocument, fetchImpl = globalThis.fetch,
   base = API_BASE, initialYear = 2027, initialTerm = 1,
+  today = new Date().toLocaleDateString("sv-SE"),
 } = {}) {
   if (!root || !doc?.createElement) throw new TypeError("일정 화면과 문서 객체가 필요합니다.");
   const year = Number(initialYear);
@@ -34,6 +27,7 @@ export function mountCalendar({
   function element(tag, className, content) {
     const node = doc.createElement(tag);
     node.className = className;
+    if (tag === "button") node.type = "button";
     if (content !== undefined) node.textContent = content;
     return node;
   }
@@ -63,7 +57,90 @@ export function mountCalendar({
   retry.type = "button";
   retry.hidden = true;
   const list = element("div", "calendar-list");
-  root.replaceChildren(controls, status, retry, list);
+  const switcher = element("div", "calendar-viewswitch");
+  const calendarButton = element("button", "button-secondary", "달력");
+  const listButton = element("button", "button-secondary", "목록");
+  switcher.append(calendarButton, listButton);
+  const panel = element("div", "calendar-panel");
+  root.replaceChildren(controls, status, retry, switcher, panel, list);
+  let events = [];
+  let mode = "calendar";
+  let selected = validDate(today) ? today : `${year}-01-01`;
+  let month = selected.slice(0, 7);
+
+  function choose(value, focus = false) {
+    selected = value;
+    month = value.slice(0, 7);
+    renderCalendar(focus);
+  }
+
+  function renderCalendar(focus = false) {
+    calendarButton.setAttribute("aria-pressed", String(mode === "calendar"));
+    listButton.setAttribute("aria-pressed", String(mode === "list"));
+    list.hidden = mode !== "list";
+    panel.hidden = mode !== "calendar" || !events.length;
+    panel.replaceChildren();
+    if (!events.length) return;
+    const nav = element("div", "calendar-nav");
+    const previous = element("button", "button-secondary", "이전 달");
+    const next = element("button", "button-secondary", "다음 달");
+    nav.append(previous, element("p", "calendar-month-title", `${month.slice(0, 4)}년 ${Number(month.slice(5))}월`), next);
+    previous.addEventListener("click", () => choose(moveDate(selected, "PageUp")));
+    next.addEventListener("click", () => choose(moveDate(selected, "PageDown")));
+    const grid = element("div", "calendar-month");
+    grid.setAttribute("role", "grid");
+    grid.setAttribute("aria-label", `${month} 학사일정`);
+    let focusTarget;
+    for (const week of layoutMonth(events, month)) {
+      const row = element("div", "calendar-week");
+      row.setAttribute("role", "row");
+      for (const [column, day] of week.days.entries()) {
+        const matches = events.filter((event) => event.starts_on <= day.date && eventEnd(event) >= day.date);
+        const cell = element("div", "calendar-day" + (day.outside ? " is-outside" : "") +
+          (day.weekend ? " is-weekend" : "") + (day.date === today ? " is-today" : "") + (day.date === selected ? " is-selected" : ""));
+        cell.setAttribute("role", "gridcell");
+        cell.setAttribute("tabindex", day.date === selected ? "0" : "-1");
+        cell.setAttribute("aria-selected", String(day.date === selected));
+        cell.setAttribute("aria-label", `${day.date}, 일정 ${matches.length}개`);
+        cell.append(element("span", "calendar-day-number", String(Number(day.date.slice(8)))));
+        const dots = element("span", "calendar-dots");
+        dots.setAttribute("aria-hidden", "true");
+        for (const event of matches.slice(0, 3)) dots.append(element("span", `calendar-dot calendar-cat-${classifyEvent(event)}`));
+        cell.append(dots);
+        if (week.hidden[column]) cell.append(element("span", "calendar-more", `+${week.hidden[column]}개`));
+        cell.addEventListener("click", () => choose(day.date, true));
+        cell.addEventListener("keydown", (event) => {
+          if (["Enter", " ", "ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Home", "End", "PageUp", "PageDown"].includes(event.key)) {
+            event.preventDefault();
+            choose(moveDate(day.date, event.key), true);
+          }
+        });
+        if (day.date === selected) focusTarget = cell;
+        row.append(cell);
+      }
+      const bars = element("div", "calendar-bars");
+      bars.setAttribute("aria-hidden", "true");
+      for (const bar of week.bars) {
+        const node = element("span", `calendar-bar calendar-cat-${bar.category}` +
+          (bar.continuedBefore ? " is-continued-before" : "") + (bar.continuedAfter ? " is-continued-after" : ""), text(bar.event.audience));
+        node.style.gridColumn = `${bar.startColumn + 1} / ${bar.endColumn + 2}`;
+        node.style.gridRow = String(bar.row + 1);
+        bars.append(node);
+      }
+      row.append(bars);
+      grid.append(row);
+    }
+    const dayList = element("div", "calendar-day-list");
+    dayList.append(element("h4", "", `${selected} 일정`));
+    const matches = events.filter((event) => event.starts_on <= selected && eventEnd(event) >= selected);
+    dayList.append(...matches.map(renderEvent));
+    if (!matches.length) dayList.append(element("p", "empty-state", TEXT.empty));
+    panel.append(nav, grid, dayList);
+    if (focus) focusTarget?.focus();
+  }
+  calendarButton.addEventListener("click", () => { mode = "calendar"; renderCalendar(); });
+  listButton.addEventListener("click", () => { mode = "list"; renderCalendar(); });
+  renderCalendar();
 
   let state = "idle";
   let requestNumber = 0;
@@ -106,9 +183,15 @@ export function mountCalendar({
       const data = await requestJson(`${base.replace(/\/+$/, "")}/api/v1/academic-calendar/${selectedYear}/${selectedTerm}`, { fetchImpl });
       if (number !== requestNumber) return;
       if (!Array.isArray(data?.events)) throw new TypeError("학사일정 응답 형식 오류");
-      const events = data.events.filter((event) => validDate(event?.starts_on))
+      events = data.events.filter((event) => validDate(event?.starts_on))
         .sort((a, b) => a.starts_on < b.starts_on ? -1 : a.starts_on > b.starts_on ? 1 : 0);
       list.replaceChildren(...events.map(renderEvent));
+      if (events.length) {
+        const last = events.reduce((end, event) => eventEnd(event) > end ? eventEnd(event) : end, events[0].starts_on);
+        selected = validDate(today) && today >= events[0].starts_on && today <= last ? today : events[0].starts_on;
+        month = selected.slice(0, 7);
+      }
+      renderCalendar();
       showStatus(events.length ? "ready" : "empty", events.length ? "" : TEXT.empty);
     } catch (error) {
       if (number !== requestNumber) return;
@@ -119,6 +202,8 @@ export function mountCalendar({
   function start() {
     const number = ++requestNumber;
     list.replaceChildren();
+    events = [];
+    renderCalendar();
     showStatus("loading", TEXT.loading);
     pending = load(number, years.select.value, terms.select.value);
     return pending;
