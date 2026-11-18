@@ -317,6 +317,9 @@ test("통합 달력 보기: 격자 첫 행에 일~토 요일 머리를 그린다
 
 function qaCss() {
   const css = read("assets/app.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  // 주석이 일찍 닫히면 남은 설명 줄이 다음 선택자에 붙어 규칙 전체가 버려진다.
+  assert.doesNotMatch(css, /\*\//, "주석 밖에 남은 */가 없다");
+  assert.match(css, /\}\s*\.qa-defs \{/, ".qa-defs 선택자 앞에는 이전 규칙의 닫는 괄호만 온다");
   const start = css.indexOf(".qa-defs {");
   const end = css.lastIndexOf(":focus-visible");
   assert.ok(start > 0 && start < end, "빠른 실행 링 규칙은 마지막 포커스 규칙 앞에 둔다");
@@ -410,6 +413,11 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
 
   const size = Number(rule(".qa-ring").match(/--qa-size:\s*(\d+)px/)?.[1]);
   assert.ok(size >= 44, `버블 지름 ${size}px`);
+  // 배치 함수와 채움 원(r = 지름/2)은 설계 문서의 지름을 쓴다. 버튼 지름이 다르면 버튼과 채움 크기가 어긋난다.
+  const designDoc = readFileSync(new URL("../docs/DESIGN.md", import.meta.url), "utf8");
+  const designSize = Number(designDoc.match(/버블 지름은 `--qa-size: (\d+)px`/)?.[1]);
+  assert.equal(size, designSize, "CSS 버블 지름은 설계 문서 값과 같다");
+  assert.equal(size, 48, "동작 작업의 배치·채움 원 지름 48px(r 24)과 같다");
   const item = rule(".qa-item");
   assert.match(item, /width:\s*var\(--qa-size\);\s*height:\s*var\(--qa-size\)/);
   assert.match(item, /min-width:\s*var\(--touch\);\s*min-height:\s*var\(--touch\)/);
@@ -444,9 +452,21 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
   assert.match(label, /white-space:\s*nowrap/);
   assert.match(label, /--qa-label-center:\s*calc\(var\(--qa-origin-x, 0px\) \+ var\(--qa-x, 0px\)\);/);
   assert.match(label, /max-width:\s*calc\(100vw - 8px\)/);
-  const shift = label.match(/transform:\s*translateX\(clamp\(([\s\S]+)\)\);/)?.[1].replace(/\s+/g, " ");
-  assert.equal(shift, "calc(4px - var(--qa-label-center)), -50%, calc(100vw - 4px - var(--qa-label-center) - 100%)",
-    "라벨은 가운데 정렬하되 화면 양끝 4px 안으로 밀어 넣는다");
+  assert.match(label, /--qa-label-middle:\s*calc\(var\(--qa-origin-y, 0px\) \+ var\(--qa-y, 0px\)\);/);
+  assert.match(label, /bottom:\s*calc\(100% \+ 4px\)/, "라벨은 버블 위 4px에 붙는다");
+  const shift = label.match(/transform:\s*translate\(([\s\S]+)\);/)?.[1].replace(/\s+/g, " ").trim();
+  assert.equal(shift,
+    "clamp(calc(4px - var(--qa-label-center)), -50%, calc(100vw - 4px - var(--qa-label-center) - 100%)), "
+      + "max(0px, calc(8px + var(--qa-size) / 2 + 100% - var(--qa-label-middle)))",
+    "라벨은 가운데 정렬하되 화면 양끝과 위쪽 4px 안으로 밀어 넣는다");
+  // 320px 화면에서 + 중심이 (50, 150)일 때 맨 위 버블 중심이 y 30px 근처면, 버블 위 라벨(높이 약 22px)이
+  // 30 - 24 - 4 - 22 = -20px에서 시작해 잘린다. 모자란 만큼만 내려 위쪽 4px에 맞춘다.
+  const top = (middle, height, diameter = size) => {
+    const natural = middle - diameter / 2 - 4 - height;
+    return natural + Math.max(0, 8 + diameter / 2 + height - middle);
+  };
+  for (const middle of [24, 30, 40, 60]) assert.ok(top(middle, 22) >= 4, `중심 y ${middle}px 라벨 위쪽`);
+  assert.equal(top(150, 22), 100, "위쪽 공간이 넉넉하면 버블 위 4px 그대로");
   // 320px 화면, 왼쪽 + 버튼의 첫 버블(중심 x 34px)에 너비 72px 라벨: 가운데 정렬이면 왼쪽 끝이 -2px라 잘린다.
   const place = (center, width, viewport) => {
     const offset = Math.max(4 - center, Math.min(-width / 2, viewport - 4 - center - width));

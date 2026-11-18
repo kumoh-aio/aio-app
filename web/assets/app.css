@@ -1549,7 +1549,8 @@ html[data-theme="neumorphic"] :is(
    채움(.qa-blob)은 버튼과 똑같이 --qa-x·--qa-y만큼만 움직이고 원점을 다시 더하지 않는다.
    SVG 크기는 innerWidth·innerHeight와 같은 100vw·100dvh로 둔다. 100%(inset: 0)는 세로 스크롤바를 빼므로
    viewBox 폭과 어긋나 채움이 축소된다. 가장 확실한 viewBox 크기는 SVG 자신의 getBoundingClientRect()다.
-   채움 원은 버블마다 하나씩이고 트리거 자리에 남는 원은 두지 않는다. */
+   채움 원은 버블마다 하나씩이고 트리거 자리에 남는 원은 두지 않는다. 버블 지름 --qa-size는 배치 함수와
+   채움 원(r = 지름/2)이 쓰는 48px와 같다.
    goo 필터는 index.html의 #aio-goo를 SVG <g filter> 속성으로 걸고, 글자와 아이콘은 필터 밖 .qa-items에 둔다. */
 .qa-defs {
   position: absolute;
@@ -1559,7 +1560,7 @@ html[data-theme="neumorphic"] :is(
 }
 
 .qa-ring {
-  --qa-size: 52px;
+  --qa-size: 48px;
   --qa-duration: 240ms;
   --qa-ease: cubic-bezier(0.22, 1, 0.36, 1);
   position: fixed;
@@ -1640,10 +1641,12 @@ html[data-theme="neumorphic"] :is(
   transform: translate(var(--qa-x, 0px), var(--qa-y, 0px)) scale(1);
 }
 
-/* 라벨은 버블 가운데에 맞추되 화면 양끝 4px 안으로 밀어 넣는다. 버블 중심의 화면 x는
-   원점 + 이동량이고, translateX의 %는 라벨 자신의 너비라 글자 길이와 언어에 상관없이 잘리지 않는다. */
+/* 라벨은 버블 위 가운데에 붙되 화면 양끝과 위쪽 4px 안으로 밀어 넣는다. 버블 중심의 화면 좌표는
+   원점 + 이동량이고, translate의 %는 라벨 자신의 너비·높이라 글자 길이와 언어에 상관없이 잘리지 않는다.
+   라벨 위쪽 끝은 중심y - 지름/2 - 4px - 라벨 높이이므로, 4px보다 위로 나가면 모자란 만큼만 내린다. */
 .qa-label {
   --qa-label-center: calc(var(--qa-origin-x, 0px) + var(--qa-x, 0px));
+  --qa-label-middle: calc(var(--qa-origin-y, 0px) + var(--qa-y, 0px));
   position: absolute;
   bottom: calc(100% + 4px);
   left: 50%;
@@ -1660,8 +1663,9 @@ html[data-theme="neumorphic"] :is(
   overflow: hidden;
   text-overflow: ellipsis;
   pointer-events: none;
-  transform: translateX(clamp(calc(4px - var(--qa-label-center)), -50%,
-    calc(100vw - 4px - var(--qa-label-center) - 100%)));
+  transform: translate(
+    clamp(calc(4px - var(--qa-label-center)), -50%, calc(100vw - 4px - var(--qa-label-center) - 100%)),
+    max(0px, calc(8px + var(--qa-size) / 2 + 100% - var(--qa-label-middle))));
 }
 
 html[data-theme="neumorphic"] .qa-label {
