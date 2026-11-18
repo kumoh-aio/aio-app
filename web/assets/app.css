@@ -702,16 +702,45 @@ a {
   justify-self: center;
 }
 
-.grad-badge[data-met="met"] {
+.grad-badge[data-status="met"] {
   background: #E6F6FC;
   border-color: var(--color-sky);
   color: var(--color-school-blue);
 }
 
-.grad-badge[data-met="unmet"] {
+.grad-badge[data-status="short"] {
   background: #FFF8D6;
   border-color: var(--color-yellow);
   color: var(--color-navy);
+}
+
+.grad-badge[data-status="needs_check"] {
+  background: var(--color-surface);
+  border-style: dashed;
+  border-color: var(--color-text-muted);
+  color: var(--color-text-muted);
+}
+
+.grad-profile {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.grad-rows {
+  display: grid;
+  gap: 8px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.grad-row {
+  display: grid;
+  gap: 4px;
+  padding: 10px 0 0;
+  border-top: 1px solid var(--color-border);
 }
 
 .grad-notice {

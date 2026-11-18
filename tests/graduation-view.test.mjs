@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import {
   TEXT,
+  STATUS_LABELS,
   ASK_QUESTION,
   normalizeDiagnosis,
   ringPercent,
@@ -94,55 +95,103 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-// ---- 명백히 가상인 진단 응답. 실제 학번·학점·규정이 아니다. ----
-// 서버 계약 모양: 요건 배열 items[]와 각 항목의 details.current·details.required, 객체형 biskit_recommendations.programs[]
+// ---- 명백히 가상인 진단 응답. 실제 학번·학점·규정·주소가 아니다. ----
+// 모양은 서버 API_SPEC.md "GET /graduation-demo"(kumoh-academic-rag@37b7518)를 따른다.
+const basis = (rule, extra = {}) => ({ applied_rule: rule, source_title: null, source_url: null, checked_on: null, ...extra });
+const row = (id, label, status, current, required, extra = {}) => ({
+  id, label, status, current, required, shortfall: null, reason: null, basis: basis("가상 기준"), ...extra,
+});
+
+const BASIS_CREDITS = basis("가상 학점 기준", { source_title: "가상 기준표", source_url: "https://example.invalid/rule", checked_on: "2000-01-01" });
+const BASIS_MAJOR = basis("가상 전공 기준");
+const BASIS_EXTRA = basis("가상 비교과 기준");
+const BASIS_MILEAGE = basis("가상 마일리지 기준", { source_title: "가상 비교과 안내", source_url: "http://example.invalid/insecure" });
+
+function creditsItem(status, total, rest = "met", totalExtra = {}) {
+  return row("total_credits", "가상 학점", status, null, null, {
+    basis: BASIS_CREDITS,
+    details: [
+      row("credits_total", "가상 총학점", total.status, total.current, total.required, { basis: BASIS_CREDITS, ...totalExtra }),
+      row("general_required", "가상 교양필수", rest, 10, 10, { basis: BASIS_CREDITS }),
+      row("general_elective", "가상 교양선택", rest, 5, 5, { basis: BASIS_CREDITS }),
+      row("msc", "가상 기초", rest, 9, 9, { basis: BASIS_CREDITS }),
+      row("major", "가상 전공", rest, 40, 40, { basis: BASIS_CREDITS }),
+    ],
+  });
+}
+
 const D02 = {
-  status: "가상 진행 중",
-  eligible: false,
+  profile: { id: "virtual-d02", label: "가상 학생 둘", department: "가상 학과", admission_year: 2000, admission_type: "가상", track: "가상", is_fictional: true },
   items: [
-    {
-      id: "total_credits",
-      name: "총 이수학점",
-      status: "unmet",
-      details: { current: 12, required: 77 },
-      basis: { document: "가상 학칙", article: "제0조(가상)", snippet: "가상 인용 문장", url: "https://example.invalid/rule" },
-    },
-    { id: "virtual_b", name: "가상 영역 나", status: "미충족", details: { current: 5, required: 9 }, message: "가상 설명 둘", url: "https://example.invalid/u2" },
-    { id: "virtual_a", name: "가상 영역 가", status: "met", details: { current: 7, required: 7 } },
+    creditsItem("met", { status: "met", current: 80, required: 77 }),
+    row("major_required", "가상 전공필수", "needs_check", null, null, {
+      reason: "가상 상위 확인 사유",
+      basis: BASIS_MAJOR,
+      details: [
+        row("required_courses", "가상 전공필수 과목", "needs_check", null, null, { reason: "가상 과목 확인 필요", basis: BASIS_MAJOR }),
+        row("thesis", "가상 졸업논문", "met", 1, 1, { basis: BASIS_MAJOR }),
+      ],
+    }),
+    row("extracurricular", "가상 비교과", "short", null, null, {
+      shortfall: 2,
+      basis: BASIS_EXTRA,
+      details: [
+        row("career_education", "가상 진로교육", "met", 1, 1, { basis: BASIS_EXTRA }),
+        row("counseling", "가상 상담", "short", 0, 1, { shortfall: 1, basis: BASIS_EXTRA }),
+        row("mileage", "가상 마일리지", "short", 10, 30, { shortfall: 20, basis: BASIS_MILEAGE }),
+      ],
+    }),
   ],
   biskit_recommendations: {
-    message: "가상 추천 안내",
+    shortfall_points: 20,
+    listed_on: "2000-01-02",
+    evaluated_at: "2000-01-02T09:00:00+09:00",
+    portal_url: "https://example.invalid/portal",
     programs: [
-      { title: "가상 비교과 다", description: "가상 추천 이유", url: "https://example.invalid/b3" },
-      { name: "가상 비교과 가", url: "https://example.invalid/b1" },
+      {
+        title: "가상 프로그램 나", audience: "가상 대상", eligibility: "eligible", apply_until: "2000-01-05", deadline_status: "open",
+        event_on: null, mileage_status: "published", mileage_points: 10,
+        notice_url: "https://example.invalid/n2", application_url: "https://example.invalid/a2", login_required: true,
+      },
+      {
+        title: "가상 프로그램 가", audience: "가상 대상", eligibility: "needs_check", apply_until: "2000-01-06", deadline_status: "needs_check",
+        event_on: "2000-01-07", mileage_status: "undisclosed", mileage_points: null,
+        notice_url: null, application_url: "javascript:alert(1)", login_required: false,
+      },
     ],
   },
 };
 
-// 분자가 분모보다 큼, 상태 객체, details 안의 근거, 빈 추천
+// 총학점 부족, 마일리지 충족이라 추천은 null
 const D03 = {
-  status: { label: "가상 충족", met: true },
+  profile: { id: "virtual-d03", label: "가상 학생 셋", is_fictional: true },
   items: [
-    { id: "total_credits", name: "총 이수학점", passed: true, details: { current: 999, required: 100 } },
-    {
-      name: "가상 영역",
-      status: "가상 충족",
-      details: { current: 50, required: 40, evidence: [{ document: "가상 규정", article: "제1조", url: "https://example.invalid/r1" }] },
-    },
+    creditsItem("short", { status: "short", current: 46, required: 77 }, "short", { shortfall: 31 }),
+    row("major_required", "가상 전공필수", "short", null, null, {
+      shortfall: 1,
+      basis: BASIS_MAJOR,
+      details: [row("thesis", "가상 졸업논문", "short", 0, 1, { shortfall: 1, basis: BASIS_MAJOR })],
+    }),
+    row("extracurricular", "가상 비교과", "met", null, null, {
+      basis: BASIS_EXTRA,
+      details: [row("mileage", "가상 마일리지", "met", 999, 30, { basis: BASIS_EXTRA })],
+    }),
   ],
-  biskit_recommendations: { programs: [] },
+  biskit_recommendations: null,
 };
 
-// summary 속 상태, 문자열 숫자, 0 분모, 불리언 상태, 문자열 근거, 배열형 추천
+// 마일리지 120 부족, 추천 후보 없음, 숫자 문자열 분모 0
 const D04 = {
-  summary: { status: "가상 확인 필요" },
+  profile: { id: "virtual-d04", label: "가상 학생 넷", is_fictional: true },
   items: [
-    { key: "TOTAL", name: "가상 합계", details: { current: "0.5", required: 0 } },
-    { name: "가상 영역 하나", details: { current: "0.5" } },
-    { name: "가상 문자열 요건", status: false, message: "가상 설명" },
+    creditsItem("met", { status: "met", current: "0.5", required: 0 }),
+    row("extracurricular", "가상 비교과", "short", null, null, {
+      shortfall: 1,
+      basis: BASIS_EXTRA,
+      details: [row("mileage", "가상 마일리지", "short", 0, 120, { shortfall: 120, basis: BASIS_EXTRA })],
+    }),
   ],
-  evidence: ["가상 지침 제9조"],
-  biskit_recommendations: [{ name: "가상 비교과 하나", description: "가상 설명" }],
+  biskit_recommendations: { shortfall_points: 120, listed_on: "2000-01-02", evaluated_at: null, portal_url: "https://example.invalid/portal", programs: [] },
 };
 
 const FIXTURES = { "virtual-d02": D02, "virtual-d03": D03, "virtual-d04": D04 };
@@ -161,21 +210,27 @@ function mount({ loadDiagnosis, onAsk } = {}) {
       return load(id, options);
     },
   });
+  const title = (n) => n.find((c) => c.className === "grad-item-title")?.textContent;
   const q = {
+    title,
     status: () => root.find((n) => n.hasAttribute("data-grad-status")),
     retry: () => root.find((n) => n.hasAttribute("data-grad-retry")),
     result: () => root.find((n) => n.hasAttribute("data-grad-result")),
+    section: (key) => q.result().find((n) => n.getAttribute("data-grad-section") === key),
     sections: () => q.result().findAll((n) => n.hasAttribute("data-grad-section")).map((n) => n.getAttribute("data-grad-section")),
     total: () => root.find((n) => n.hasAttribute("data-grad-total")),
     value: () => root.find((n) => n.getAttribute("class") === "grad-ring-value"),
     circles: () => root.findAll((n) => n.tagName === "circle"),
-    badges: () => root.findAll((n) => n.hasAttribute("data-grad-badge")),
-    titles: (attr) => root.findAll((n) => n.hasAttribute(attr)).map((n) => n.find((c) => c.className === "grad-item-title")?.textContent),
     all: (attr) => root.findAll((n) => n.hasAttribute(attr)),
+    titles: (attr) => q.all(attr).map(title),
+    items: () => q.all("data-grad-item").map((n) => n.getAttribute("data-grad-item")),
+    details: (id) => q.all("data-grad-item").find((n) => n.getAttribute("data-grad-item") === id).findAll((n) => n.hasAttribute("data-grad-detail")),
+    part: (node, className) => node.find((n) => n.className === className),
     links: () => root.findAll((n) => n.tagName === "A"),
+    urlTexts: () => q.all("data-grad-url-text").map((n) => n.textContent),
     ask: () => root.find((n) => n.hasAttribute("data-grad-ask")),
   };
-  return { doc, root, view, calls, q };
+  return { doc, root, view, calls, q, title };
 }
 
 // 저장소 쓰기를 세는 가짜 전역 localStorage·sessionStorage
@@ -222,32 +277,45 @@ test("safeLink는 https만 남기고 http·javascript·상대 경로·공백은 
   }
 });
 
-test("normalizeDiagnosis: 요건 항목이 없으면 형식 오류, 졸업 학점 기본값을 채우지 않는다", () => {
-  assert.throws(() => normalizeDiagnosis(null), TypeError);
-  assert.throws(() => normalizeDiagnosis([]), TypeError);
-  assert.throws(() => normalizeDiagnosis({ items: [] }), TypeError);
-  assert.throws(() => normalizeDiagnosis({ nonsense: true }), TypeError);
-  const d = normalizeDiagnosis({ items: [{ id: "total_credits", name: "총 이수학점", details: { current: 3 } }] });
-  assert.equal(d.total.earned.text, "3");
-  assert.equal(d.total.required, null);
-  assert.deepEqual([d.unmet, d.evidence, d.recommendations], [[], [], []]);
+test("상태 이름은 명세의 met·short·needs_check", () => {
+  assert.deepEqual(STATUS_LABELS, { met: "충족", short: "부족", needs_check: "확인 필요" });
 });
 
-test("normalizeDiagnosis: 명세 구조의 items[].details와 biskit_recommendations.programs를 읽는다", () => {
+test("normalizeDiagnosis: items[]가 없거나 행이 없으면 형식 오류, 졸업 학점 기본값을 채우지 않는다", () => {
+  for (const bad of [null, [], {}, { items: [] }, { items: [null, {}] }, { total: { earned: 1 } }]) {
+    assert.throws(() => normalizeDiagnosis(bad), TypeError, JSON.stringify(bad));
+  }
+  const d = normalizeDiagnosis({ items: [row("total_credits", "가상 학점", "met", null, null, { details: [row("credits_total", "가상 총학점", "met", 3, null)] })] });
+  assert.equal(d.total.row.current.text, "3");
+  assert.equal(d.total.row.required, null);
+  assert.equal(d.recommendations, null);
+});
+
+test("normalizeDiagnosis: 배열형 details·basis 필드·객체형 추천을 명세대로 읽는다", () => {
   const d = normalizeDiagnosis(structuredClone(D02));
-  assert.deepEqual([d.total.earned.value, d.total.required.value], [12, 77]);
-  assert.deepEqual(d.items.map((item) => [item.name, item.current?.text, item.required?.text, item.status.met]), [
-    ["총 이수학점", "12", "77", false], ["가상 영역 나", "5", "9", false], ["가상 영역 가", "7", "7", true],
+  assert.deepEqual(d.items.map((item) => [item.id, item.status, item.details.map((r) => r.id)]), [
+    ["total_credits", "met", ["credits_total", "general_required", "general_elective", "msc", "major"]],
+    ["major_required", "needs_check", ["required_courses", "thesis"]],
+    ["extracurricular", "short", ["career_education", "counseling", "mileage"]],
   ]);
-  assert.deepEqual(d.unmet.map((item) => item.name), ["총 이수학점", "가상 영역 나"]);
-  assert.deepEqual(d.evidence.map((e) => [e.owner, e.document, e.article]), [["총 이수학점", "가상 학칙", "제0조(가상)"]]);
-  assert.deepEqual(d.recommendations.map((r) => r.title), ["가상 비교과 다", "가상 비교과 가"]);
-  assert.equal(d.recommendNote, "가상 추천 안내");
+  assert.deepEqual(d.unmet.map((r) => [r.owner, r.id, r.status]), [
+    ["가상 전공필수", "required_courses", "needs_check"], ["가상 비교과", "counseling", "short"], ["가상 비교과", "mileage", "short"],
+  ]);
+  assert.deepEqual(d.evidence.map((e) => [e.appliedRule, e.sourceTitle, e.checkedOn, e.url, e.owners.length]), [
+    ["가상 학점 기준", "가상 기준표", "2000-01-01", "https://example.invalid/rule", 6],
+    ["가상 전공 기준", "", "", null, 3],
+    ["가상 비교과 기준", "", "", null, 3],
+    ["가상 마일리지 기준", "가상 비교과 안내", "", null, 1],
+  ]);
+  assert.deepEqual(d.recommendations.programs.map((p) => [p.title, p.notice.url, p.application.url]), [
+    ["가상 프로그램 나", "https://example.invalid/n2", "https://example.invalid/a2"],
+    ["가상 프로그램 가", null, null],
+  ]);
 });
 
 // ---- 화면 ----
 
-test("처음과 clear 뒤에는 로그인 안내만 있고 결과는 비어 있다", () => {
+test("처음에는 로그인 안내만 있고 결과는 비어 있다", () => {
   const { view, q } = mount();
   assert.equal(view.state, "idle");
   assert.equal(q.status().textContent, TEXT.idle);
@@ -256,109 +324,140 @@ test("처음과 clear 뒤에는 로그인 안내만 있고 결과는 비어 있�
   assert.equal(q.result().children.length, 0);
 });
 
-test("가상 d02: 서버 배열 순서대로 영역·미충족·근거·BISKIT 추천을 그린다", async () => {
-  const { view, calls, q } = mount({ onAsk: () => {} });
+test("검토 재현(이전): 명세 구조 응답이 형식 오류로 빠지지 않는다", async () => {
+  const data = { items: [row("total_credits", "가상 학점", "met", null, null, { details: [row("credits_total", "가상 총학점", "met", 12, 77)] })] };
+  const { view, q } = mount({ loadDiagnosis: async () => data });
+  assert.equal(await view.show("virtual-d02"), "ready");
+  assert.equal(q.total().textContent, "12 / 77학점");
+});
+
+test("검토 재현(최신): 배열형 details의 short 행이 세부 현황과 부족 요건에 나온다", async () => {
+  const data = { items: [{ id: "virtual_parent", label: "가상 상위", status: "short", details: [{ id: "msc", label: "가상 영역", current: 1, required: 2, status: "short" }] }] };
+  const { view, q } = mount({ loadDiagnosis: async () => data });
+  assert.equal(await view.show("virtual-d02"), "ready");
+  const [detail] = q.details("virtual_parent");
+  assert.equal(q.title(detail), "가상 영역");
+  assert.equal(q.part(detail, "grad-item-credits").textContent, "1 / 2");
+  assert.equal(q.part(detail, "grad-badge").textContent, "부족");
+  assert.equal(q.part(detail, "grad-bar-fill").style.width, "50%");
+  assert.deepEqual(q.titles("data-grad-unmet"), ["가상 영역"]);
+});
+
+test("가상 d02: 항목·세부 행·부족 요건·근거·BISKIT 추천을 서버 순서대로 그린다", async () => {
+  const { view, calls, q, root } = mount({ onAsk: () => {} });
   assert.equal(await view.show("virtual-d02"), "ready");
   assert.equal(calls.length, 1);
   assert.equal(calls[0].id, "virtual-d02");
   assert.ok(calls[0].options.signal instanceof AbortSignal);
   assert.equal(q.status().hidden, true);
-  assert.equal(q.result().hidden, false);
-  assert.equal(view.state, "ready", "명세 구조 응답이 형식 오류로 빠지지 않는다");
   assert.deepEqual(q.sections(), ["total", "items", "unmet", "evidence", "recommendations"]);
 
-  // 총학점: 분모는 서버 값(77), 숫자는 그대로
-  assert.equal(q.total().textContent, "12 / 77학점");
+  // 총학점 그래프: credits_total 행, 분모는 서버 값, 숫자는 그대로, 비율만 100%로 제한
+  assert.equal(q.total().textContent, "80 / 77학점");
+  assert.equal(q.value().getAttribute("stroke-dasharray"), "100 100");
+  assert.equal(q.value().getAttribute("pathLength"), "100");
   assert.equal(q.circles().length, 2);
   for (const circle of q.circles()) assert.ok(circle.namespaceURI.endsWith("/2000/svg"));
-  assert.equal(q.value().getAttribute("stroke-dasharray"), `${Number(((12 / 77) * 100).toFixed(2))} 100`);
-  assert.equal(q.value().getAttribute("pathLength"), "100");
+  assert.equal(q.part(q.section("total"), "grad-badge").textContent, "충족");
+  assert.equal(q.part(q.section("total"), "grad-profile").textContent, "가상 학생 둘");
 
-  // 상태: 전체 + 항목별, 충족 여부를 data-met으로. 영어 코드만 우리말로 바꾼다.
-  assert.deepEqual(q.badges().map((b) => [b.textContent, b.getAttribute("data-met")]), [
-    ["가상 진행 중", "unmet"], [TEXT.unmet, "unmet"], ["미충족", "unmet"], [TEXT.met, "met"],
+  // 상위 행과 세부 행
+  assert.deepEqual(q.items(), ["total_credits", "major_required", "extracurricular"]);
+  assert.deepEqual(q.details("total_credits").map(q.title), ["가상 총학점", "가상 교양필수", "가상 교양선택", "가상 기초", "가상 전공"]);
+  assert.equal(q.part(q.details("total_credits")[1], "grad-item-credits").textContent, "10 / 10학점");
+  assert.deepEqual(q.details("extracurricular").map((n) => [q.title(n), n.getAttribute("data-status"), q.part(n, "grad-badge").textContent]), [
+    ["가상 진로교육", "met", "충족"], ["가상 상담", "short", "부족"], ["가상 마일리지", "short", "부족"],
+  ]);
+  const mileage = q.details("extracurricular")[2];
+  assert.equal(q.part(mileage, "grad-item-credits").textContent, "10 / 30", "비교과에는 학점 단위를 붙이지 않는다");
+  assert.equal(q.part(mileage, "grad-item-detail").textContent, "부족 20");
+  assert.equal(q.part(q.details("major_required")[0], "grad-item-detail").textContent, "가상 과목 확인 필요");
+
+  // 부족·확인 필요 요건
+  assert.deepEqual(q.titles("data-grad-unmet"), ["가상 전공필수 과목", "가상 상담", "가상 마일리지"]);
+  assert.deepEqual(q.all("data-grad-unmet").map((n) => q.part(n, "grad-tag").textContent), ["가상 전공필수", "가상 비교과", "가상 비교과"]);
+
+  // 근거: applied_rule·source_title·checked_on, 같은 근거는 한 번
+  const evidence = q.all("data-grad-evidence");
+  assert.equal(evidence.length, 4);
+  assert.equal(q.part(evidence[0], "citation-snippet").textContent, "가상 학점 기준");
+  assert.equal(q.part(evidence[0], "citation-meta").textContent, "가상 기준표 · 확인일 2000-01-01");
+  assert.equal(q.part(evidence[0], "grad-tag").textContent, "가상 학점 · 가상 총학점 · 가상 교양필수 · 가상 교양선택 · 가상 기초 · 가상 전공");
+  assert.equal(q.part(evidence[3], "citation-meta").textContent, "가상 비교과 안내");
+
+  // BISKIT 추천: 부족량·확인일, 프로그램 순서와 사실, 공지·신청 링크
+  assert.equal(q.section("recommendations").find((n) => n.hasAttribute("data-grad-rec-meta")).textContent, "부족 마일리지 20점 · 목록 확인일 2000-01-02");
+  assert.deepEqual(q.titles("data-grad-recommend"), ["가상 프로그램 나", "가상 프로그램 가"]);
+  assert.deepEqual(q.all("data-grad-facts").map((n) => n.textContent), [
+    "신청 마감 2000-01-05 · 마일리지 10점 · BISKIT 로그인 필요",
+    "신청 마감 2000-01-06 · 마감 시각 확인 필요 · 행사일 2000-01-07 · 마일리지 미공개 · 재학 상태 확인 필요",
   ]);
 
-  assert.deepEqual(q.titles("data-grad-item"), ["총 이수학점", "가상 영역 나", "가상 영역 가"]);
-  const items = q.all("data-grad-item");
-  assert.equal(items[1].find((n) => n.className === "grad-item-credits").textContent, "5 / 9학점");
-  assert.equal(items[1].find((n) => n.className === "grad-bar-fill").style.width, `${Number(((5 / 9) * 100).toFixed(2))}%`);
-  assert.deepEqual(q.titles("data-grad-unmet"), ["총 이수학점", "가상 영역 나"]);
-  assert.equal(q.all("data-grad-unmet")[1].find((n) => n.className === "grad-item-detail").textContent, "가상 설명 둘");
-  assert.deepEqual(q.titles("data-grad-recommend"), ["가상 비교과 다", "가상 비교과 가"]);
-  const recSection = q.result().find((n) => n.getAttribute("data-grad-section") === "recommendations");
-  assert.ok(recSection.find((n) => n.className === "grad-notice" && n.textContent === "가상 추천 안내"));
-  const evidence = q.all("data-grad-evidence");
-  assert.equal(evidence.length, 1);
-  assert.equal(evidence[0].children[0].textContent, "총 이수학점", "어느 요건의 근거인지 표시한다");
-  assert.equal(evidence[0].children[1].textContent, "가상 학칙 · 제0조(가상)");
-  assert.equal(evidence[0].children[2].tagName, "BLOCKQUOTE");
-
-  // 링크: 서버 순서, https, 새 창 noopener
-  assert.deepEqual(q.links().map((a) => a.getAttribute("href")), [
-    "https://example.invalid/u2", "https://example.invalid/rule", "https://example.invalid/b3", "https://example.invalid/b1",
+  // 링크: https만 a, 나머지는 글자. 새 창 noopener
+  assert.deepEqual(q.links().map((a) => [a.getAttribute("data-grad-link"), a.getAttribute("href")]), [
+    ["source", "https://example.invalid/rule"],
+    ["portal", "https://example.invalid/portal"],
+    ["notice", "https://example.invalid/n2"],
+    ["apply", "https://example.invalid/a2"],
   ]);
   for (const a of q.links()) {
     assert.equal(a.getAttribute("target"), "_blank");
     assert.equal(a.getAttribute("rel"), "noopener noreferrer");
   }
+  assert.deepEqual(q.urlTexts(), ["http://example.invalid/insecure", "javascript:alert(1)"]);
+  assert.ok(!root.textContent.includes("virtual-d02"), "학생 ID는 화면에 그리지 않는다");
 });
 
-test("가상 d03: 분자가 분모보다 커도 그래프는 100%, 숫자는 서버 값 그대로, 빈 배열 구역은 없다", async () => {
+test("가상 d03: 총학점 부족은 서버 숫자 그대로, 추천 null이면 추천 구역이 없다", async () => {
   const { view, q } = mount();
   await view.show("virtual-d03");
-  assert.equal(q.total().textContent, "999 / 100학점");
-  assert.equal(q.value().getAttribute("stroke-dasharray"), "100 100");
-  assert.deepEqual(q.sections(), ["total", "items", "evidence"], "빈 추천·미충족 구역은 그리지 않는다");
-  assert.deepEqual(q.badges().map((b) => [b.textContent, b.getAttribute("data-met")]), [
-    ["가상 충족", "met"], [TEXT.met, "met"], ["가상 충족", "met"],
-  ]);
-  assert.equal(q.all("data-grad-item")[1].find((n) => n.className === "grad-bar-fill").style.width, "100%");
-  assert.equal(q.all("data-grad-evidence")[0].children[0].textContent, "가상 영역", "details 안의 근거도 읽는다");
-  assert.deepEqual(q.links().map((a) => a.getAttribute("href")), ["https://example.invalid/r1"]);
+  assert.equal(q.total().textContent, "46 / 77학점");
+  assert.equal(q.value().getAttribute("stroke-dasharray"), `${Number(((46 / 77) * 100).toFixed(2))} 100`);
+  assert.equal(q.part(q.section("total"), "grad-badge").textContent, "부족");
+  assert.equal(q.part(q.section("total"), "grad-notice").textContent, "부족 31");
+  assert.deepEqual(q.sections(), ["total", "items", "unmet", "evidence"]);
+  assert.deepEqual(q.titles("data-grad-unmet"), ["가상 총학점", "가상 교양필수", "가상 교양선택", "가상 기초", "가상 전공", "가상 졸업논문"]);
+  assert.equal(q.part(q.all("data-grad-unmet")[0], "grad-item-credits").textContent, "46 / 77학점");
+  assert.equal(q.part(q.details("extracurricular")[0], "grad-bar-fill").style.width, "100%");
+  assert.equal(q.links().length, 1, "근거 원문 링크 하나만");
   assert.equal(q.ask(), null, "onAsk가 없으면 묻기 버튼도 없다");
 });
 
-test("가상 d04: summary 상태·문자열 숫자·0 분모·불리언 상태·문자열 근거·배열형 추천도 서버 값대로 그린다", async () => {
+test("가상 d04: 분모 0과 숫자 문자열, 추천 후보가 없으면 안내만 보인다", async () => {
   const { view, q } = mount();
   await view.show("virtual-d04");
   assert.equal(q.total().textContent, "0.5 / 0학점");
   assert.equal(q.value().getAttribute("stroke-dasharray"), "0 100");
   assert.deepEqual(q.sections(), ["total", "items", "unmet", "evidence", "recommendations"]);
-  assert.deepEqual(q.badges().map((b) => [b.textContent, b.getAttribute("data-met")]), [
-    ["가상 확인 필요", "unknown"], [TEXT.unmet, "unmet"],
-  ]);
-  assert.deepEqual(q.titles("data-grad-item"), ["가상 합계", "가상 영역 하나", "가상 문자열 요건"]);
-  assert.equal(q.all("data-grad-item")[1].find((n) => n.className === "grad-item-credits").textContent, "0.5학점");
-  assert.equal(q.all("data-grad-item")[1].find((n) => n.className === "grad-bar"), null, "분모가 없으면 막대도 없다");
-  assert.deepEqual(q.titles("data-grad-unmet"), ["가상 문자열 요건"]);
-  assert.equal(q.all("data-grad-evidence")[0].textContent, "가상 지침 제9조");
-  assert.deepEqual(q.titles("data-grad-recommend"), ["가상 비교과 하나"]);
-  assert.equal(q.links().length, 0);
+  assert.deepEqual(q.titles("data-grad-unmet"), ["가상 마일리지"]);
+  assert.equal(q.part(q.all("data-grad-unmet")[0], "grad-item-detail").textContent, "부족 120");
+  const rec = q.section("recommendations");
+  assert.equal(rec.find((n) => n.hasAttribute("data-grad-rec-meta")).textContent, "부족 마일리지 120점 · 목록 확인일 2000-01-02");
+  assert.equal(rec.find((n) => n.hasAttribute("data-grad-no-programs")).textContent, TEXT.noPrograms);
+  assert.equal(q.all("data-grad-recommend").length, 0);
 });
 
-test("총학점 항목이 없으면 형식 오류 대신 그래프만 빼고 요건을 그린다", async () => {
-  const data = { status: "가상 진행 중", items: [{ name: "가상 요건", details: { current: 1, required: 2 } }] };
+test("총학점 행이 없으면 형식 오류 대신 그래프만 빼고 요건을 그린다", async () => {
+  const data = { items: [row("extracurricular", "가상 비교과", "met", null, null, { details: [row("mileage", "가상 마일리지", "met", 30, 30)] })] };
   const { view, q } = mount({ loadDiagnosis: async () => data });
   assert.equal(await view.show("virtual-x"), "ready");
   assert.equal(q.circles().length, 0);
   assert.equal(q.total(), null);
-  assert.equal(q.result().find((n) => n.getAttribute("data-grad-section") === "total").children[0].textContent, TEXT.summaryTitle);
-  assert.deepEqual(q.titles("data-grad-item"), ["가상 요건"]);
+  assert.equal(q.section("total").children[0].textContent, TEXT.summaryTitle);
+  assert.deepEqual(q.items(), ["extracurricular"]);
 });
 
-test("http·javascript·상대 경로 링크는 a로 만들지 않고 글자로만 둔다, 서버 글자는 태그가 되지 않는다", async () => {
+test("서버 글자는 태그가 되지 않고, 상대 경로 링크도 a로 만들지 않는다", async () => {
   const data = {
-    items: [{ name: "<img src=x onerror=alert(1)>", status: "unmet", url: "javascript:alert(1)", details: { current: 1, required: 2 } }],
-    evidence: [{ document: "가상 규정", url: "http://example.invalid/x" }],
-    biskit_recommendations: {
-      programs: [{ title: "가상 비교과", url: "/relative/path" }, { title: "가상 비교과 둘", url: "https://example.invalid/ok" }],
-    },
+    items: [row("extracurricular", "<img src=x onerror=alert(1)>", "short", 0, 1, {
+      basis: basis("가상 기준", { source_url: "/relative/path" }),
+    })],
+    biskit_recommendations: { shortfall_points: 1, portal_url: "javascript:alert(1)", programs: [{ title: "가상", notice_url: "http://example.invalid/x" }] },
   };
   const { view, q, root } = mount({ loadDiagnosis: async () => data });
   await view.show("virtual-x");
-  assert.deepEqual(q.links().map((a) => a.getAttribute("href")), ["https://example.invalid/ok"]);
-  assert.deepEqual(q.all("data-grad-url-text").map((n) => n.textContent), ["javascript:alert(1)", "http://example.invalid/x", "/relative/path"]);
+  assert.equal(q.links().length, 0);
+  assert.deepEqual(q.urlTexts(), ["/relative/path", "javascript:alert(1)", "http://example.invalid/x"]);
   assert.equal(q.titles("data-grad-unmet")[0], "<img src=x onerror=alert(1)>");
   assert.ok(!root.find((n) => n.tagName === "IMG"));
 });
@@ -383,7 +482,7 @@ test("진단 404: 안내와 다시 시도, 다시 시도하면 같은 계정으�
   assert.deepEqual(calls.map((c) => c.id), ["virtual-d02", "virtual-d02"]);
   assert.equal(view.state, "ready");
   assert.equal(q.retry().hidden, true);
-  assert.equal(q.total().textContent, "12 / 77학점");
+  assert.equal(q.total().textContent, "80 / 77학점");
 });
 
 test("네트워크 실패와 형식 오류: 안내와 다시 시도, 이전 계정 결과는 남지 않는다", async () => {
@@ -415,7 +514,7 @@ test("새 계정을 열면 이전 결과를 바로 지우고, 늦게 온 이전 
   assert.equal(await second, "ready");
   gates["virtual-d02"].resolve(structuredClone(D02));
   assert.equal(await first, "stale");
-  assert.equal(q.total().textContent, "999 / 100학점", "늦은 d02가 d03을 덮지 않는다");
+  assert.equal(q.total().textContent, "46 / 77학점", "늦은 d02가 d03을 덮지 않는다");
 });
 
 test("clear 뒤에 늦게 온 응답과 실패는 그리지 않는다", async () => {
@@ -451,7 +550,7 @@ test("결과를 보인 뒤 clear하면 결과를 지우고 다시 시도는 숨�
 
 test("아이오에게 묻기는 계정 정보 없는 일반 질문만 넘기고 매번 새 객체다", async () => {
   const asked = [];
-  const { view, q, root } = mount({ onAsk: (pending) => asked.push(pending) });
+  const { view, q } = mount({ onAsk: (pending) => asked.push(pending) });
   await view.show("virtual-d02");
   q.ask().click();
   q.ask().click();
@@ -460,9 +559,8 @@ test("아이오에게 묻기는 계정 정보 없는 일반 질문만 넘기고 
   for (const pending of asked) {
     assert.deepEqual(Object.keys(pending), ["question"]);
     assert.equal(pending.question, ASK_QUESTION);
-    assert.doesNotMatch(JSON.stringify(pending), /virtual-d02|12|77/);
+    assert.doesNotMatch(JSON.stringify(pending), /virtual-d02|가상 학생|80|77/);
   }
-  assert.ok(!root.textContent.includes("virtual-d02"), "학생 ID를 화면에 그리지 않는다");
 });
 
 test("show는 빈 ID를 거부하고 요청하지 않는다", async () => {
@@ -508,10 +606,11 @@ test("graduation-view.mjs는 innerHTML류·저장소·외부 주소를 쓰지 �
   }
 });
 
-test("app.css: 졸업 규칙은 포커스 규칙 앞에 있고 링크·버튼 터치 영역은 44px 변수", () => {
+test("app.css: 졸업 규칙은 포커스 규칙 앞에 있고 링크 터치 영역은 44px 변수", () => {
   const css = read("../web/assets/app.css");
   const focusAt = css.lastIndexOf(":focus-visible");
-  for (const selector of [".grad-result", ".grad-ring", ".grad-ring-value", ".grad-badge", ".grad-item", ".grad-link"]) {
+  for (const selector of [".grad-result", ".grad-ring", ".grad-ring-value", ".grad-badge", ".grad-item", ".grad-row", ".grad-link",
+    '.grad-badge[data-status="short"]', '.grad-badge[data-status="needs_check"]']) {
     const at = css.indexOf(`${selector} {`);
     assert.ok(at > 0 && at < focusAt, selector);
   }

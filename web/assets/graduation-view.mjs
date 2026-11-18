@@ -1,5 +1,14 @@
 // 졸업 요건 진단 화면. 문서 객체와 진단 조회 함수를 주입받고, 서버가 준 값만 그대로 그린다.
 // 학생 ID는 조회 함수에만 넘기고 화면·저장소·아이오 질문에 남기지 않는다. 글자는 textContent로만 넣는다.
+//
+// 응답 계약: 서버 저장소 api/docs/API_SPEC.md "GET /graduation-demo"
+// (namelesspark/kumoh-academic-rag@37b75185cfc393a87110acee3e8a0d96e2d5ef71)
+// - items[]: total_credits·major_required·extracurricular 상위 행. 상위 행만 details[] 세부 행을 가진다.
+// - 행: id, label, status(met·short·needs_check), current, required, shortfall, reason, basis
+// - basis: applied_rule(항상), source_title, source_url, checked_on(확인한 값만)
+// - biskit_recommendations: null 또는 { shortfall_points, listed_on, evaluated_at, portal_url, programs[] }
+// - programs[]: title, audience, eligibility, apply_until, deadline_status, event_on,
+//   mileage_status, mileage_points, notice_url, application_url, login_required
 import { secureUrl } from "./api.mjs";
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -15,60 +24,43 @@ export const TEXT = Object.freeze({
   summaryTitle: "졸업 요건 진단",
   credits: "학점",
   itemsTitle: "요건별 이수 현황",
-  unmetTitle: "미충족 요건",
+  unmetTitle: "부족·확인 필요 요건",
   evidenceTitle: "근거",
-  recommendTitle: "BISKIT 추천",
-  link: "바로 가기 ↗",
+  recommendTitle: "BISKIT 비교과 추천",
+  noPrograms: "지금 신청할 수 있는 추천 프로그램이 없어요.",
+  shortfall: "부족",
+  shortfallPoints: "부족 마일리지",
+  listedOn: "목록 확인일",
+  checkedOn: "확인일",
+  applyUntil: "신청 마감",
+  eventOn: "행사일",
+  audience: "대상",
+  eligibilityCheck: "재학 상태 확인 필요",
+  deadlineCheck: "마감 시각 확인 필요",
+  loginRequired: "BISKIT 로그인 필요",
+  mileagePoints: "마일리지",
+  mileageAnnounced: "마일리지 지급 공지",
+  mileageUndisclosed: "마일리지 미공개",
+  portal: "BISKIT 열기 ↗",
+  notice: "공지 보기 ↗",
+  apply: "신청하기 ↗",
+  source: "원문 보기 ↗",
   ask: "아이오에게 졸업 요건 묻기",
-  met: "충족",
-  unmet: "미충족",
 });
+
+export const STATUS_LABELS = Object.freeze({ met: "충족", short: "부족", needs_check: "확인 필요" });
 
 /** 아이오 탭에 넘기는 일반 질문. 계정 정보는 넣지 않는다. */
 export const ASK_QUESTION = "졸업 요건은 어떻게 확인하나요?";
 
-/**
- * 응답 키 후보. 서버 계약은 요건 배열 items[]와 각 항목의 details.current·details.required,
- * 객체형 biskit_recommendations.programs[]를 쓴다. 앞에 있는 키가 이긴다. 배열은 서버 순서를 지킨다.
- */
-export const FIELDS = Object.freeze({
-  items: ["items", "requirements"],
-  details: ["details"],
-  current: ["current", "earned", "completed"],
-  required: ["required", "needed"],
-  status: ["status", "status_label", "result"],
-  met: ["met", "passed", "satisfied", "eligible"],
-  itemKey: ["id", "key", "code", "type"],
-  name: ["name", "title", "label", "requirement"],
-  detail: ["message", "detail", "description", "reason"],
-  evidence: ["evidence", "basis", "citations", "sources"],
-  recommendations: ["biskit_recommendations", "biskit", "recommendations"],
-  programs: ["programs", "items"],
-  document: ["document", "title", "name", "source"],
-  article: ["article", "clause"],
-  snippet: ["snippet", "text", "quote"],
-  url: ["url", "link", "href"],
-  notice: ["notice", "disclaimer", "message"],
-  summary: ["summary", "overall"],
-});
-
-// 상태 문자열을 충족 여부로 읽는다. 표시 글자는 서버 값을 쓰고, 영어 코드만 우리말로 바꾼다.
-const MET_CODES = new Map([
-  ["met", true], ["pass", true], ["passed", true], ["satisfied", true], ["complete", true], ["completed", true], ["ok", true],
-  ["unmet", false], ["not_met", false], ["fail", false], ["failed", false], ["unsatisfied", false], ["incomplete", false], ["missing", false],
-]);
-const MET_WORDS = [[/미충족|부족|미이수|불충족|미달/, false], [/충족|통과|완료|이수/, true]];
+const TOTAL_ITEM = "total_credits";
+const TOTAL_DETAIL = "credits_total";
 
 const isObj = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
-const pick = (obj, keys) => {
-  if (!isObj(obj)) return undefined;
-  for (const key of keys) if (obj[key] !== undefined && obj[key] !== null) return obj[key];
-  return undefined;
-};
 const str = (value) => (typeof value === "string" ? value.trim() : "");
 
-// 학점은 서버 값 그대로 보여 준다. 숫자이거나 숫자 문자열일 때만 받는다.
-function credit(value) {
+// 수치는 서버 값 그대로 보여 준다. 숫자이거나 숫자 문자열일 때만 받고, null은 표시하지 않는다.
+function num(value) {
   if (typeof value === "number" && Number.isFinite(value)) return { text: String(value), value };
   if (typeof value === "string" && value.trim() && Number.isFinite(Number(value))) {
     return { text: value.trim(), value: Number(value) };
@@ -82,110 +74,110 @@ export function safeLink(value) {
   return new URL(value).href;
 }
 
-function linkOf(raw) {
-  const value = isObj(raw) ? pick(raw, FIELDS.url) : undefined;
-  return { url: safeLink(value), rawUrl: str(value) };
+const link = (value) => ({ url: safeLink(value), rawUrl: str(value) });
+
+function basisOf(raw) {
+  if (!isObj(raw)) return null;
+  const basis = {
+    appliedRule: str(raw.applied_rule),
+    sourceTitle: str(raw.source_title),
+    checkedOn: str(raw.checked_on),
+    ...link(raw.source_url),
+  };
+  return basis.appliedRule || basis.sourceTitle || basis.rawUrl ? basis : null;
 }
 
-function statusOf(...sources) {
-  let label = "";
-  let met = null;
-  for (const raw of sources) {
-    if (!isObj(raw)) continue;
-    const value = pick(raw, FIELDS.status);
-    if (!label) {
-      if (isObj(value)) label = str(pick(value, ["label", "text", "name"]));
-      else if (typeof value === "string") label = str(value);
-    }
-    if (met === null) {
-      const flag = (isObj(value) ? pick(value, FIELDS.met) : undefined) ?? pick(raw, FIELDS.met) ?? value;
-      if (typeof flag === "boolean") met = flag;
-    }
-  }
-  if (met === null && label) {
-    const code = label.toLowerCase();
-    if (MET_CODES.has(code)) met = MET_CODES.get(code);
-    else for (const [pattern, value] of MET_WORDS) if (pattern.test(label)) { met = value; break; }
-  }
-  if (MET_CODES.has(label.toLowerCase())) label = MET_CODES.get(label.toLowerCase()) ? TEXT.met : TEXT.unmet;
-  if (!label && met !== null) label = met ? TEXT.met : TEXT.unmet;
-  return { label, met };
+function rowOf(raw) {
+  if (!isObj(raw)) return null;
+  const id = str(raw.id);
+  const label = str(raw.label) || id;
+  if (!label) return null;
+  const status = str(raw.status);
+  return {
+    id,
+    label,
+    status,
+    statusLabel: STATUS_LABELS[status] ?? status,
+    current: num(raw.current),
+    required: num(raw.required),
+    shortfall: num(raw.shortfall) ?? (str(raw.shortfall) ? { text: str(raw.shortfall), value: NaN } : null),
+    reason: str(raw.reason),
+    basis: basisOf(raw.basis),
+  };
 }
 
-function evidenceList(raw, owner = "") {
-  const value = isObj(raw) ? pick(raw, FIELDS.evidence) : raw;
-  const entries = Array.isArray(value) ? value : value == null ? [] : [value];
-  return entries.flatMap((entry) => {
-    if (typeof entry === "string") return str(entry) ? [{ owner, document: str(entry), article: "", snippet: "", url: null, rawUrl: "" }] : [];
-    if (!isObj(entry)) return [];
-    const out = {
-      owner,
-      document: str(pick(entry, FIELDS.document)),
-      article: str(pick(entry, FIELDS.article)),
-      snippet: str(pick(entry, FIELDS.snippet)),
-      ...linkOf(entry),
-    };
-    return out.document || out.article || out.snippet ? [out] : [];
-  });
-}
-
-function isTotalItem(raw, name) {
-  return /total/i.test(str(pick(raw, FIELDS.itemKey))) || /총\s*(이수)?\s*학점|졸업\s*학점/.test(name);
+function programOf(raw) {
+  if (!isObj(raw)) return null;
+  const title = str(raw.title);
+  if (!title) return null;
+  return {
+    title,
+    audience: str(raw.audience),
+    eligibility: str(raw.eligibility),
+    applyUntil: str(raw.apply_until),
+    deadlineStatus: str(raw.deadline_status),
+    eventOn: str(raw.event_on),
+    mileageStatus: str(raw.mileage_status),
+    mileagePoints: num(raw.mileage_points),
+    loginRequired: raw.login_required === true,
+    notice: link(raw.notice_url),
+    application: link(raw.application_url),
+  };
 }
 
 /**
- * 서버 진단 응답을 화면 모양으로 바꾼다. 요건 항목도 총학점도 없으면 형식 오류로 본다.
- * 총학점 항목이 없으면 그래프만 빼고, 졸업 학점 같은 기본값을 지어내 채우지 않는다.
+ * 서버 진단 응답을 화면 모양으로 바꾼다. 행이 하나도 없으면 형식 오류다.
+ * 졸업 학점 같은 기본값을 지어내 채우지 않는다.
  */
 export function normalizeDiagnosis(data) {
-  if (!isObj(data)) throw new TypeError("diagnosis must be an object");
-  const summary = pick(data, FIELDS.summary);
-  const rawItems = pick(data, FIELDS.items);
+  if (!isObj(data) || !Array.isArray(data.items)) throw new TypeError("diagnosis needs items[]");
+  const items = data.items.flatMap((raw) => {
+    const row = rowOf(raw);
+    if (!row) return [];
+    row.details = Array.isArray(raw.details) ? raw.details.map(rowOf).filter(Boolean) : [];
+    return [row];
+  });
+  if (!items.length) throw new TypeError("diagnosis needs at least one requirement row");
 
-  let total = null;
-  const items = [];
-  const evidence = [];
-  for (const raw of Array.isArray(rawItems) ? rawItems : []) {
-    if (!isObj(raw)) continue;
-    const name = str(pick(raw, FIELDS.name));
-    if (!name) continue;
-    const details = isObj(pick(raw, FIELDS.details)) ? pick(raw, FIELDS.details) : raw;
-    const item = {
-      name,
-      current: credit(pick(details, FIELDS.current)),
-      required: credit(pick(details, FIELDS.required)),
-      status: statusOf(raw, details),
-      detail: str(pick(raw, FIELDS.detail)) || str(pick(details, FIELDS.detail)),
-      ...linkOf(raw),
-    };
-    if (!total && item.current && isTotalItem(raw, name)) total = { earned: item.current, required: item.required };
-    items.push(item);
-    evidence.push(...evidenceList(raw, name));
-    if (details !== raw) evidence.push(...evidenceList(details, name));
-  }
-  evidence.push(...evidenceList(data));
+  // 총학점: total_credits 행의 credits_total 세부 행. 없으면 그래프를 그리지 않는다.
+  const totalItem = items.find((row) => row.id === TOTAL_ITEM);
+  const totalRow = totalItem?.details.find((row) => row.id === TOTAL_DETAIL);
+  const total = totalRow?.current ? { row: totalRow, item: totalItem } : null;
 
-  if (!items.length && !total) throw new TypeError("diagnosis needs requirement items");
-
-  const recRaw = pick(data, FIELDS.recommendations);
-  const programs = Array.isArray(recRaw) ? recRaw : Array.isArray(pick(recRaw, FIELDS.programs)) ? pick(recRaw, FIELDS.programs) : [];
-  const recommendations = programs.flatMap((raw) => {
-    if (typeof raw === "string") return str(raw) ? [{ title: str(raw), detail: "", url: null, rawUrl: "" }] : [];
-    if (!isObj(raw)) return [];
-    const out = { title: str(pick(raw, FIELDS.name)), detail: str(pick(raw, FIELDS.detail)), ...linkOf(raw) };
-    return out.title || out.detail ? [out] : [];
+  // 부족·확인 필요: 세부 행이 있으면 세부 행, 없으면 상위 행. 서버 순서를 지킨다.
+  const unmet = items.flatMap((row) => {
+    const rows = row.details.length ? row.details : [row];
+    return rows.filter((r) => r.status === "short" || r.status === "needs_check").map((r) => ({ ...r, owner: row.label, ownerId: row.id }));
   });
 
-  return {
-    total,
-    status: statusOf(data, summary),
-    items,
-    unmet: items.filter((item) => item.status.met === false),
-    evidence,
-    recommendations,
-    recommendNote: isObj(recRaw) ? str(pick(recRaw, FIELDS.notice)) : "",
-    notice: str(pick(data, ["notice", "disclaimer"])) || str(pick(summary, ["notice", "disclaimer"])),
-  };
+  // 근거: 상위 행 → 세부 행 순서. 같은 근거는 한 번만 보이고 해당 행 이름을 모은다.
+  const evidence = [];
+  const seen = new Map();
+  for (const row of items) {
+    for (const r of [row, ...row.details]) {
+      if (!r.basis) continue;
+      const key = JSON.stringify([r.basis.appliedRule, r.basis.sourceTitle, r.basis.rawUrl, r.basis.checkedOn]);
+      if (seen.has(key)) {
+        seen.get(key).owners.push(r.label);
+        continue;
+      }
+      const entry = { ...r.basis, owners: [r.label] };
+      seen.set(key, entry);
+      evidence.push(entry);
+    }
+  }
+
+  const rec = data.biskit_recommendations;
+  const recommendations = isObj(rec)
+    ? {
+      shortfallPoints: num(rec.shortfall_points),
+      listedOn: str(rec.listed_on),
+      portal: link(rec.portal_url),
+      programs: Array.isArray(rec.programs) ? rec.programs.map(programOf).filter(Boolean) : [],
+    }
+    : null;
+
+  return { profileLabel: isObj(data.profile) ? str(data.profile.label) : "", total, items, unmet, evidence, recommendations };
 }
 
 /** 그래프 비율(0~100). 분모가 없거나 0 이하면 0. 숫자 표시는 이 값과 따로 서버 값을 쓴다. */
@@ -253,45 +245,78 @@ export function mountGraduationDiagnosis({ root, doc, loadDiagnosis, onAsk }) {
     result.hidden = next !== "ready";
   }
 
-  function section(title, key, children, note) {
+  const section = (title, key) => {
     const box = el(doc, "section", { className: "grad-section", attrs: { "data-grad-section": key } });
     box.append(el(doc, "h2", { className: "section-title", text: title }));
-    if (note) box.append(el(doc, "p", { className: "grad-notice", text: note }));
+    return box;
+  };
+  const list = (children) => {
     const ul = el(doc, "ul", { className: "grad-list" });
     ul.append(...children);
-    box.append(ul);
-    return box;
-  }
+    return ul;
+  };
+  const line = (className, text, attrs) => el(doc, "p", { className, text, attrs });
 
-  function linkOrText(url, rawUrl) {
+  // https면 a, 아니면 주소를 글자로만 둔다. 값이 없으면 아무것도 없다.
+  function linkOrText({ url, rawUrl }, label, kind) {
     if (url) {
-      return el(doc, "a", { className: "grad-link", text: TEXT.link, attrs: { href: url, target: "_blank", rel: "noopener noreferrer", "data-grad-link": "" } });
+      return el(doc, "a", { className: "grad-link", text: label, attrs: { href: url, target: "_blank", rel: "noopener noreferrer", "data-grad-link": kind } });
     }
-    return rawUrl ? el(doc, "p", { className: "grad-url-text", text: rawUrl, attrs: { "data-grad-url-text": "" } }) : null;
+    return rawUrl ? line("grad-url-text", rawUrl, { "data-grad-url-text": kind }) : null;
   }
 
-  function stateBadge(s) {
-    if (!s.label) return null;
-    const metText = s.met === true ? "met" : s.met === false ? "unmet" : "unknown";
-    return el(doc, "span", { className: "grad-badge", text: s.label, attrs: { "data-met": metText, "data-grad-badge": "" } });
+  function badge(row) {
+    if (!row.statusLabel) return null;
+    return el(doc, "span", { className: "grad-badge", text: row.statusLabel, attrs: { "data-status": row.status || "unknown", "data-grad-badge": "" } });
   }
 
-  function creditText(current, required) {
-    if (!current) return "";
-    return required ? `${current.text} / ${required.text}${TEXT.credits}` : `${current.text}${TEXT.credits}`;
+  function amount(row, unit) {
+    if (!row.current && !row.required) return "";
+    const u = unit ?? "";
+    if (row.current && row.required) return `${row.current.text} / ${row.required.text}${u}`;
+    return `${(row.current ?? row.required).text}${u}`;
   }
 
-  function ringNode(total) {
+  function note(row) {
+    if (row.status === "short" && row.shortfall) return `${TEXT.shortfall} ${row.shortfall.text}`;
+    if (row.reason) return row.reason;
+    return "";
+  }
+
+  function rowNode(row, unit, attr, { className = "grad-row", tag = "" } = {}) {
+    const li = el(doc, "li", { className, attrs: { [attr]: "", "data-status": row.status || "unknown" } });
+    if (tag) li.append(el(doc, "span", { className: "grad-tag", text: tag }));
+    const head = el(doc, "div", { className: "grad-item-head" });
+    head.append(line("grad-item-title", row.label));
+    const b = badge(row);
+    if (b) head.append(b);
+    li.append(head);
+    const credits = amount(row, unit);
+    if (credits) li.append(line("grad-item-credits", credits));
+    const n = note(row);
+    if (n) li.append(line("grad-item-detail", n));
+    if (row.current && row.required) {
+      const bar = el(doc, "div", { className: "grad-bar", attrs: { "aria-hidden": "true" } });
+      // style 속성 대신 CSSOM으로 넣어 CSP(style-src 'self')에 걸리지 않게 한다.
+      const fill = el(doc, "div", { className: "grad-bar-fill" });
+      fill.style.width = `${pct2(row.current.value, row.required.value)}%`;
+      bar.append(fill);
+      li.append(bar);
+    }
+    return li;
+  }
+
+  function ringNode(row) {
     const ring = el(doc, "div", { className: "grad-ring", attrs: { "data-grad-ring": "" } });
-    const pct = pct2(total.earned.value, total.required?.value);
+    const pct = pct2(row.current.value, row.required?.value);
     const graph = svg(doc, "svg", { viewBox: "0 0 120 120", class: "grad-ring-svg", "aria-hidden": "true", focusable: "false" });
     graph.append(
       svg(doc, "circle", { cx: 60, cy: 60, r: 52, pathLength: 100, class: "grad-ring-track" }),
       svg(doc, "circle", { cx: 60, cy: 60, r: 52, pathLength: 100, class: "grad-ring-value", "stroke-dasharray": `${pct} 100`, "data-percent": pct }),
     );
-    const label = el(doc, "p", { className: "grad-ring-label", attrs: { "data-grad-total": "" } });
-    label.append(el(doc, "strong", { className: "grad-ring-earned", text: total.earned.text }));
-    label.append(el(doc, "span", { className: "grad-ring-required", text: total.required ? ` / ${total.required.text}${TEXT.credits}` : TEXT.credits }));
+    const label = line("grad-ring-label", null, { "data-grad-total": "" });
+    label.append(el(doc, "strong", { className: "grad-ring-earned", text: row.current.text }));
+    label.append(el(doc, "span", { className: "grad-ring-required", text: row.required ? ` / ${row.required.text}${TEXT.credits}` : TEXT.credits }));
     ring.append(graph, label);
     return ring;
   }
@@ -299,72 +324,103 @@ export function mountGraduationDiagnosis({ root, doc, loadDiagnosis, onAsk }) {
   function renderResult(d) {
     const nodes = [];
 
-    // 요약: 총학점 원형 그래프(있을 때만)와 전체 상태
+    // 요약: 총학점 원형 그래프와 총학점 상태
     const summary = el(doc, "section", { className: "card grad-summary", attrs: { "data-grad-section": "total" } });
     summary.append(el(doc, "h2", { className: "section-title", text: d.total ? TEXT.totalTitle : TEXT.summaryTitle }));
-    if (d.total) summary.append(ringNode(d.total));
-    const badge = stateBadge(d.status);
-    if (badge) summary.append(badge);
-    if (d.notice) summary.append(el(doc, "p", { className: "grad-notice", text: d.notice, attrs: { "data-grad-notice": "" } }));
+    if (d.profileLabel) summary.append(line("grad-profile", d.profileLabel, { "data-grad-profile": "" }));
+    if (d.total) {
+      summary.append(ringNode(d.total.row));
+      const b = badge(d.total.row);
+      if (b) summary.append(b);
+      const n = note(d.total.row);
+      if (n) summary.append(line("grad-notice", n));
+    }
     nodes.push(summary);
 
-    if (d.items.length) {
-      nodes.push(section(TEXT.itemsTitle, "items", d.items.map((item) => {
-        const li = el(doc, "li", { className: "card grad-item grad-category", attrs: { "data-grad-item": "" } });
-        const head = el(doc, "div", { className: "grad-item-head" });
-        head.append(el(doc, "p", { className: "grad-item-title", text: item.name }));
-        const credits = creditText(item.current, item.required);
-        if (credits) head.append(el(doc, "p", { className: "grad-item-credits", text: credits }));
-        li.append(head);
-        const b = stateBadge(item.status);
-        if (b) li.append(b);
-        if (item.current && item.required) {
-          const bar = el(doc, "div", { className: "grad-bar", attrs: { "aria-hidden": "true" } });
-          // style 속성 대신 CSSOM으로 넣어 CSP(style-src 'self')에 걸리지 않게 한다.
-          const fill = el(doc, "div", { className: "grad-bar-fill" });
-          fill.style.width = `${pct2(item.current.value, item.required.value)}%`;
-          bar.append(fill);
-          li.append(bar);
-        }
-        return li;
-      })));
-    }
+    // 요건별 현황: 상위 행 카드 안에 세부 행을 서버 순서대로
+    const items = section(TEXT.itemsTitle, "items");
+    items.append(list(d.items.map((item) => {
+      const li = el(doc, "li", { className: "card grad-item", attrs: { "data-grad-item": item.id, "data-status": item.status || "unknown" } });
+      const head = el(doc, "div", { className: "grad-item-head" });
+      head.append(line("grad-item-title", item.label));
+      const b = badge(item);
+      if (b) head.append(b);
+      li.append(head);
+      const n = note(item);
+      if (n) li.append(line("grad-item-detail", n));
+      if (!item.details.length) {
+        const credits = amount(item);
+        if (credits) li.append(line("grad-item-credits", credits));
+      } else {
+        const unit = item.id === TOTAL_ITEM ? TEXT.credits : "";
+        const ul = el(doc, "ul", { className: "grad-rows" });
+        ul.append(...item.details.map((row) => rowNode(row, unit, "data-grad-detail")));
+        li.append(ul);
+      }
+      return li;
+    })));
+    nodes.push(items);
 
     if (d.unmet.length) {
-      nodes.push(section(TEXT.unmetTitle, "unmet", d.unmet.map((item) => {
-        const li = el(doc, "li", { className: "card grad-item grad-unmet", attrs: { "data-grad-unmet": "" } });
-        li.append(el(doc, "p", { className: "grad-item-title", text: item.name }));
-        const credits = creditText(item.current, item.required);
-        if (credits) li.append(el(doc, "p", { className: "grad-item-credits", text: credits }));
-        if (item.detail) li.append(el(doc, "p", { className: "grad-item-detail", text: item.detail }));
-        const link = linkOrText(item.url, item.rawUrl);
-        if (link) li.append(link);
-        return li;
-      })));
+      const box = section(TEXT.unmetTitle, "unmet");
+      box.append(list(d.unmet.map((row) => rowNode(row, row.ownerId === TOTAL_ITEM ? TEXT.credits : "", "data-grad-unmet", {
+        className: "card grad-item grad-unmet",
+        tag: row.owner === row.label ? "" : row.owner,
+      }))));
+      nodes.push(box);
     }
 
     if (d.evidence.length) {
-      nodes.push(section(TEXT.evidenceTitle, "evidence", d.evidence.map((e) => {
+      const box = section(TEXT.evidenceTitle, "evidence");
+      box.append(list(d.evidence.map((e) => {
         const li = el(doc, "li", { className: "card grad-item grad-evidence", attrs: { "data-grad-evidence": "" } });
-        if (e.owner) li.append(el(doc, "span", { className: "grad-tag", text: e.owner }));
-        const meta = [e.document, e.article].filter(Boolean);
-        if (meta.length) li.append(el(doc, "p", { className: "citation-meta", text: meta.join(" · ") }));
-        if (e.snippet) li.append(el(doc, "blockquote", { className: "citation-snippet", text: e.snippet }));
-        const link = linkOrText(e.url, e.rawUrl);
-        if (link) li.append(link);
+        li.append(el(doc, "span", { className: "grad-tag", text: e.owners.join(" · ") }));
+        if (e.appliedRule) li.append(el(doc, "blockquote", { className: "citation-snippet", text: e.appliedRule }));
+        const meta = [e.sourceTitle, e.checkedOn ? `${TEXT.checkedOn} ${e.checkedOn}` : ""].filter(Boolean);
+        if (meta.length) li.append(line("citation-meta", meta.join(" · ")));
+        const a = linkOrText(e, TEXT.source, "source");
+        if (a) li.append(a);
         return li;
       })));
+      nodes.push(box);
     }
 
-    if (d.recommendations.length) {
-      nodes.push(section(TEXT.recommendTitle, "recommendations", d.recommendations.map((r) => {
-        const li = el(doc, "li", { className: "card grad-item grad-recommend", attrs: { "data-grad-recommend": "" } });
-        if (r.title) li.append(el(doc, "p", { className: "grad-item-title", text: r.title }));
-        if (r.detail) li.append(el(doc, "p", { className: "grad-item-detail", text: r.detail }));
-        const link = linkOrText(r.url, r.rawUrl);
-        if (link) li.append(link);
-        return li;
-      }), d.recommendNote));
+    // BISKIT 추천: 서버가 null이면(마일리지 충족·부족량 모름) 구역을 그리지 않는다.
+    if (d.recommendations) {
+      const r = d.recommendations;
+      const box = section(TEXT.recommendTitle, "recommendations");
+      const meta = [
+        r.shortfallPoints ? `${TEXT.shortfallPoints} ${r.shortfallPoints.text}점` : "",
+        r.listedOn ? `${TEXT.listedOn} ${r.listedOn}` : "",
+      ].filter(Boolean);
+      if (meta.length) box.append(line("grad-notice", meta.join(" · "), { "data-grad-rec-meta": "" }));
+      const portal = linkOrText(r.portal, TEXT.portal, "portal");
+      if (portal) box.append(portal);
+      if (!r.programs.length) {
+        box.append(line("grad-notice", TEXT.noPrograms, { "data-grad-no-programs": "" }));
+      } else {
+        box.append(list(r.programs.map((p) => {
+          const li = el(doc, "li", { className: "card grad-item grad-recommend", attrs: { "data-grad-recommend": "" } });
+          li.append(line("grad-item-title", p.title));
+          if (p.audience) li.append(line("grad-item-detail", `${TEXT.audience} ${p.audience}`));
+          const facts = [
+            p.applyUntil ? `${TEXT.applyUntil} ${p.applyUntil}` : "",
+            p.deadlineStatus === "needs_check" ? TEXT.deadlineCheck : "",
+            p.eventOn ? `${TEXT.eventOn} ${p.eventOn}` : "",
+            p.mileageStatus === "published" && p.mileagePoints ? `${TEXT.mileagePoints} ${p.mileagePoints.text}점`
+              : p.mileageStatus === "announced" ? TEXT.mileageAnnounced
+                : p.mileageStatus === "undisclosed" ? TEXT.mileageUndisclosed : "",
+            p.eligibility === "needs_check" ? TEXT.eligibilityCheck : "",
+            p.loginRequired ? TEXT.loginRequired : "",
+          ].filter(Boolean);
+          if (facts.length) li.append(line("grad-item-detail", facts.join(" · "), { "data-grad-facts": "" }));
+          for (const a of [linkOrText(p.notice, TEXT.notice, "notice"), linkOrText(p.application, TEXT.apply, "apply")]) {
+            if (a) li.append(a);
+          }
+          return li;
+        })));
+      }
+      nodes.push(box);
     }
 
     if (typeof onAsk === "function") {
@@ -383,7 +439,7 @@ export function mountGraduationDiagnosis({ root, doc, loadDiagnosis, onAsk }) {
   }
 
   async function show(studentId) {
-    const id = typeof studentId === "number" && Number.isFinite(studentId) ? String(studentId) : str(studentId);
+    const id = str(studentId);
     if (!id) throw new TypeError("show needs a student id");
     cancel();
     const mine = token;
