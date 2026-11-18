@@ -34,11 +34,18 @@ export function createSelectionIndicator(container, buttons) {
       container.removeAttribute("data-indicator");
       return;
     }
+    const transition = animate && position;
+    if (transition) {
+      // The previous destination can be ahead of the edge still on screen.
+      const renderedLeft = parseFloat(win.getComputedStyle(container, "::before").left);
+      if (Number.isFinite(renderedLeft)) {
+        next.direction = next.left < renderedLeft ? "back" : "forward";
+      }
+    }
     if (sameButton && position) {
       if (layoutOnly && next.left === position.left && next.right === position.right) return;
       next.direction = position.direction;
     }
-    const transition = animate && position;
     if (!transition) container.setAttribute("data-indicator", "instant");
     container.style.setProperty("--indicator-left", `${next.left}px`);
     container.style.setProperty("--indicator-right", `${next.right}px`);

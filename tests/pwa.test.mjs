@@ -54,7 +54,7 @@ function assertFile(file) {
   assert.ok(statSync(file, { throwIfNoEntry: false })?.isFile(), `Missing cache file: ${file.pathname}`);
 }
 
-function worker(scope = "https://example.invalid/app/") {
+function worker(scope = "https://example.invalid/app/", fetchResponse = () => "network") {
   const events = {};
   const calls = { opened: [], deleted: [], added: [], fetched: [], claimed: 0 };
   const cache = { addAll: async (urls) => calls.added.push(...urls), match: async () => "cached" };
@@ -67,7 +67,10 @@ function worker(scope = "https://example.invalid/app/") {
         "aio-shell-v5", "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10",
         "aio-shell-v11", "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
-    fetch: async (request) => { calls.fetched.push(request); return "network"; },
+    fetch: async (request, options) => {
+      calls.fetched.push({ request, cache: options?.cache });
+      return fetchResponse(request);
+    },
   });
   return { events, calls, cache };
 }
@@ -201,17 +204,47 @@ test("Android packages the pinned App plugin with its license and preserves defa
   assert.match(workflow, /cp node_modules\/@capacitor\/app\/LICENSE android\/app\/src\/main\/assets\/licenses\/Capacitor-App-MIT\.txt/);
 });
 
-test("listed GET uses shell cache and falls back to network on miss", async () => {
-  const { events, calls, cache } = worker();
-  const request = { url: "https://example.invalid/app/index.html", method: "GET" };
+function fetchShell(events, request) {
   let pending;
-  const event = { request, respondWith: (promise) => { pending = promise; } };
-  events.fetch(event);
-  assert.equal(await pending, "cached");
+  events.fetch({ request, respondWith: (promise) => { pending = promise; } });
+  return pending;
+}
+
+test("listed CSS GET revalidates over the network even with old CSS in the shell cache", async () => {
+  const freshCss = new Response(".tab-bar::before { content: ''; }");
+  const staleCss = new Response(".tab-bar { display: grid; }");
+  const { events, calls, cache } = worker(undefined, () => freshCss);
+  cache.match = async () => staleCss;
+  const request = { url: "https://example.invalid/app/assets/app.css", method: "GET" };
+
+  assert.equal(await fetchShell(events, request), freshCss);
+  assert.deepEqual(calls.fetched, [{ request, cache: "no-cache" }]);
+  assert.deepEqual(calls.opened, []);
+});
+
+test("listed GET falls back to the shell cache only when fetch rejects", async () => {
+  const offline = new TypeError("offline");
+  const { events, calls, cache } = worker(undefined, () => { throw offline; });
+  const request = { url: "https://example.invalid/app/index.html", method: "GET" };
+  cache.match = async (key) => {
+    assert.equal(key, request);
+    assert.equal(calls.fetched.length, 1);
+    return "cached";
+  };
+  assert.equal(await fetchShell(events, request), "cached");
+  assert.deepEqual(calls.opened, ["aio-shell-v11"]);
+
   cache.match = async () => undefined;
-  events.fetch(event);
-  assert.equal(await pending, "network");
-  assert.equal(calls.fetched.length, 1);
+  await assert.rejects(fetchShell(events, request), (error) => error === offline);
+  assert.equal(calls.fetched.length, 2);
+});
+
+test("online HTTP errors do not fall back to a stale shell file", async () => {
+  const unavailable = new Response(null, { status: 503 });
+  const { events, calls } = worker(undefined, () => unavailable);
+  const request = { url: "https://example.invalid/app/index.html", method: "GET" };
+  assert.equal(await fetchShell(events, request), unavailable);
+  assert.deepEqual(calls.opened, []);
 });
 
 // app.js의 import 줄을 걷어 내고 모듈 함수를 스텁으로 넣어 부팅한다. 네트워크와 저장소는 쓰지 않는다.

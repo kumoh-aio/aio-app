@@ -30,7 +30,7 @@ for (const useObserver of [true, false]) {
     let targetWidth = 42.5;
     const win = {
       getComputedStyle(_element, pseudo) {
-        if (pseudo === "::before") {
+        if (pseudo === "::before" && attributes.get("data-indicator") === "instant") {
           flushed.push(attributes.get("data-indicator"));
         }
         return { borderLeftWidth: "1px", borderRightWidth: "2px" };
@@ -82,3 +82,44 @@ for (const useObserver of [true, false]) {
     assert.deepEqual(flushed, ["instant", "instant"]);
   });
 }
+
+test("tab retargeting follows the current rendered edge during a transition", () => {
+  const attributes = new Map();
+  const properties = new Map();
+  let renderedLeft = "auto";
+  const win = {
+    getComputedStyle(_element, pseudo) {
+      return pseudo === "::before" ? { left: renderedLeft } : {};
+    },
+    addEventListener() {},
+  };
+  const container = {
+    ownerDocument: { defaultView: win },
+    getBoundingClientRect: () => box(0, 320),
+    setAttribute: (name, value) => attributes.set(name, value),
+    style: { setProperty: (name, value) => properties.set(name, value) },
+  };
+  const tabs = Array.from({ length: 5 }, (_, index) => ({
+    getBoundingClientRect: () => box(index * 64, 64),
+  }));
+  const [home, , , calendar, more] = tabs;
+  const update = createSelectionIndicator(container, tabs);
+
+  // At the first frame and 15 ms later, the trailing edge is still at home.
+  for (const sample of ["first frame", "15 ms"]) {
+    update(home);
+    renderedLeft = "0px";
+    update(more, true);
+    update(calendar, true);
+    assert.equal(attributes.get("data-indicator-dir"), "forward", sample);
+    assert.equal(properties.get("--indicator-left"), "192px");
+    assert.equal(properties.get("--indicator-right"), "64px");
+  }
+
+  update(more);
+  renderedLeft = "256px";
+  update(home, true);
+  renderedLeft = "224.5px";
+  update(calendar, true);
+  assert.equal(attributes.get("data-indicator-dir"), "back");
+});

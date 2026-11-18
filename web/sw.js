@@ -31,7 +31,13 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || url.origin !== new URL(self.registration.scope).origin
       || url.pathname.includes("/api/") || !shellUrls.includes(url.href)) return;
   event.respondWith((async () => {
-    const cache = await caches.open(CACHE_NAME);
-    return await cache.match(request) || fetch(request);
+    try {
+      return await fetch(request, { cache: "no-cache" });
+    } catch (error) {
+      const cache = await caches.open(CACHE_NAME);
+      const fallback = await cache.match(request);
+      if (fallback) return fallback;
+      throw error;
+    }
   })());
 });
