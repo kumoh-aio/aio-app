@@ -34,12 +34,35 @@ const homeRoot = document.getElementById("home-root");
 
 // 전송 화살표 ↔ 정지 ■ 모핑은 동적 import로 불러온다. 이전 셸 캐시(v11)의 워커가 아직 제어하는 동안에는
 // 새 app.js만 저장되고 send-icon.mjs는 저장되지 않는다. 정적 import면 오프라인에서 앱 전체가 시작되지 않는다.
-// 채팅을 그리기 전에 결과를 기다린다. 못 불러오면 sendIcon을 넘기지 않아 chat-view가 글자("보내기"↔"중단")를 바꾼다.
-// 팩터리를 먼저 넘기고 나중에 실패하면 chat-view는 아이콘이 있다고 보고 글자 갱신을 건너뛴다.
-const sendIconModule = await import("./send-icon.mjs").catch(() => null);
-const sendIcon = typeof sendIconModule?.mountSendIcon === "function"
-  ? (button) => sendIconModule.mountSendIcon(button, { doc: document, win: window })
-  : undefined;
+// 부팅은 이 요청을 기다리지 않는다. chat-view는 sendIcon을 받으면 글자 갱신을 맡기므로, 아이콘이 붙기 전과
+// 불러오지 못한 경우에는 이 팩터리가 글자("보내기"↔"중단", docs/DESIGN.md 전송·정지 버튼 절)를 바꾼다.
+const SEND_LABEL = Object.freeze({ send: "보내기", stop: "중단" });
+const sendIconModule = import("./send-icon.mjs").catch(() => null);
+
+function sendIcon(button) {
+  let icon = null;
+  let stopping = false;
+  const label = button.querySelector?.(".chat-send-label") ?? null;
+  // 아이콘이 붙은 뒤에도 글자는 화면 읽기·고대비용으로 남으므로 늘 상태와 맞춘다.
+  const showLabel = () => {
+    if (label) label.textContent = stopping ? SEND_LABEL.stop : SEND_LABEL.send;
+  };
+  sendIconModule.then((module) => {
+    if (typeof module?.mountSendIcon !== "function") return;
+    const mounted = module.mountSendIcon(button, { doc: document, win: window });
+    if (stopping) mounted.setStopping(true);
+    icon = mounted;
+  }).catch(() => {
+    icon = null; // 아이콘을 붙이지 못하면 글자 버튼으로 남는다
+  });
+  return {
+    setStopping(on) {
+      stopping = Boolean(on);
+      showLabel();
+      icon?.setStopping(stopping);
+    },
+  };
+}
 
 const handwriting = createHandwritingPad({
   doc: document,
@@ -153,14 +176,10 @@ home = mountHome({
 
 router.start();
 
-function registerServiceWorker() {
-  navigator.serviceWorker.register("./sw.js").catch(() => {
-    // 등록 실패해도 앱은 온라인으로 계속 동작한다.
-  });
-}
-
 if ("serviceWorker" in navigator) {
-  // 위의 await 동안 load가 이미 지났을 수 있다. 그때는 바로 등록한다.
-  if (document.readyState === "complete") registerServiceWorker();
-  else window.addEventListener("load", registerServiceWorker, { once: true });
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => {
+      // 등록 실패해도 앱은 온라인으로 계속 동작한다.
+    });
+  });
 }
