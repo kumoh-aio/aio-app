@@ -3,7 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 // 아이콘 PNG는 바이너리라 저장소에 넣지 않는다. CI·배포 빌드가 이 스크립트로 web/assets/icons/에 만들고,
-// 테스트는 makeIcons()로 임시 폴더에 만들어 확인한다.
+// 테스트는 iconPng(size)로 메모리에서 바이트를 만들어 확인한다.
 const defaultDir = new URL("../web/assets/icons/", import.meta.url);
 
 function crc32(bytes) {
@@ -26,36 +26,42 @@ function chunk(type, data) {
   return Buffer.concat([length, payload, checksum]);
 }
 
+export const ICON_SIZES = [192, 512];
+
 // 기하학적 A 문양을 직접 그린다. 캐릭터나 외부 그림을 사용하지 않는다.
+// 파일을 쓰지 않는 순수 함수: size×size RGB(8비트, 필터 0) PNG 바이트를 Buffer로 돌려준다.
+export function iconPng(size) {
+  const stride = size * 3 + 1;
+  const pixels = Buffer.alloc(stride * size);
+  for (let y = 0; y < size; y += 1) {
+    for (let x = 0; x < size; x += 1) {
+      const nx = x / size;
+      const ny = y / size;
+      const leg = ny > 0.22 && ny < 0.78 && Math.abs(Math.abs(nx - 0.5) - (ny - 0.2) * 0.42) < 0.045;
+      const bar = ny > 0.57 && ny < 0.64 && nx > 0.34 && nx < 0.66;
+      const color = leg || bar ? [255, 209, 0] : [10, 37, 64];
+      const offset = y * stride + 1 + x * 3;
+      pixels.set(color, offset);
+    }
+  }
+  const header = Buffer.alloc(13);
+  header.writeUInt32BE(size, 0);
+  header.writeUInt32BE(size, 4);
+  header[8] = 8;
+  header[9] = 2;
+  return Buffer.concat([
+    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+    chunk("IHDR", header), chunk("IDAT", deflateSync(pixels)), chunk("IEND", Buffer.alloc(0)),
+  ]);
+}
+
 export function makeIcons(outDir = defaultDir) {
   const dir = outDir instanceof URL ? outDir : pathToFileURL(outDir.endsWith("/") || outDir.endsWith("\\") ? outDir : outDir + "/");
   mkdirSync(dir, { recursive: true });
   const written = {};
-  for (const size of [192, 512]) {
-    const stride = size * 3 + 1;
-    const pixels = Buffer.alloc(stride * size);
-    for (let y = 0; y < size; y += 1) {
-      for (let x = 0; x < size; x += 1) {
-        const nx = x / size;
-        const ny = y / size;
-        const leg = ny > 0.22 && ny < 0.78 && Math.abs(Math.abs(nx - 0.5) - (ny - 0.2) * 0.42) < 0.045;
-        const bar = ny > 0.57 && ny < 0.64 && nx > 0.34 && nx < 0.66;
-        const color = leg || bar ? [255, 209, 0] : [10, 37, 64];
-        const offset = y * stride + 1 + x * 3;
-        pixels.set(color, offset);
-      }
-    }
-    const header = Buffer.alloc(13);
-    header.writeUInt32BE(size, 0);
-    header.writeUInt32BE(size, 4);
-    header[8] = 8;
-    header[9] = 2;
-    const png = Buffer.concat([
-      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-      chunk("IHDR", header), chunk("IDAT", deflateSync(pixels)), chunk("IEND", Buffer.alloc(0)),
-    ]);
+  for (const size of ICON_SIZES) {
     const file = new URL(`icon-${size}.png`, dir);
-    writeFileSync(file, png);
+    writeFileSync(file, iconPng(size));
     written[size] = file;
   }
   return written;
