@@ -793,12 +793,20 @@ test("선택 표시: 전환 도중 다시 골라 방향이 어긋나도 탭 선�
     // 예전 재현: 홈 → 더보기 전환 15ms 뒤 일정. 최신 재현: 같은 흐름에서 한 프레임(16ms) 뒤 일정.
     // 표식은 일정 왼쪽에 있으므로 맞는 방향은 forward이고, 직전 목표(더보기) 기준으로 잘못 정하면 back이다.
     for (const at of [15, 16]) {
-      for (const dir of ["forward", "back"]) {
-        const widths = run(ease, [{ at: 0, from: tab(0), to: tab(4), dir: "forward" }, { at, to: tab(3), dir }]);
-        const narrowest = Math.min(...widths);
-        assert.ok(narrowest >= minWidth, `${name} ${at}ms 뒤 ${dir}: 가장 좁은 폭 ${narrowest.toFixed(1)}px`);
-        assert.ok(Math.abs(widths.at(-1) - 64) < 0.01, `${name} ${at}ms 뒤 ${dir}: 마지막 값(일정 탭 64px)에 안착`);
-      }
+      const steps = (dir) => [{ at: 0, from: tab(0), to: tab(4), dir: "forward" }, { at, to: tab(3), dir }];
+      // 맞는 방향(forward, 표식이 일정 왼쪽에 있으므로 오른쪽으로 간다): 늦은 끝(left)이 뒤따라 표식이 일정 폭보다
+      // 좁아지지 않는다. 스프링 넘침(1.5%)만큼만 허용한다. 실제 방향 판정은 동작 모듈 테스트가 맡는다.
+      const right = run(ease, steps("forward"));
+      const travel = 129.5;
+      assert.ok(Math.min(...right.slice(at)) >= 64 - 0.02 * travel,
+        `${name} ${at}ms 뒤 forward: 늘어나는 쪽이어야 하는데 ${Math.min(...right.slice(at)).toFixed(1)}px까지 좁아짐`);
+      assert.ok(Math.abs(right.at(-1) - 64) < 0.01, `${name} ${at}ms 뒤 forward: 일정 탭 64px에 안착`);
+      // 잘못 정한 방향(back, 직전 목표 기준): 좁아지는 것은 동작 모듈 결함이지만, CSS는 표식을 사라지게 하지 않는다.
+      const wrong = run(ease, steps("back"));
+      const narrowest = Math.min(...wrong);
+      assert.ok(narrowest >= minWidth, `${name} ${at}ms 뒤 back: 가장 좁은 폭 ${narrowest.toFixed(1)}px`);
+      assert.ok(Math.min(...right.slice(at)) > narrowest, `${name} ${at}ms 뒤: 맞는 방향이 잘못된 방향보다 넓다`);
+      assert.ok(Math.abs(wrong.at(-1) - 64) < 0.01, `${name} ${at}ms 뒤 back: 일정 탭 64px에 안착`);
     }
     // 맞는 방향의 한 칸 이동은 늘어났다가 안착 폭으로 돌아온다.
     const stretch = run(ease, [{ at: 0, from: tab(0), to: tab(1), dir: "forward" }]);
