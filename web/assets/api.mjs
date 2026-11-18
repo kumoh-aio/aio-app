@@ -39,7 +39,7 @@ export async function requestJson(url, {
   }
 }
 
-function secureUrl(value) {
+export function secureUrl(value) {
   if (typeof value !== "string" || /\s/.test(value)) return false;
   try {
     return new URL(value).protocol === "https:";
