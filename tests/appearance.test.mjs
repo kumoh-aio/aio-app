@@ -596,5 +596,330 @@ test("음각양각은 카드와 탭에 볼록한 그림자, 입력과 선택 상
   assert.match(effect, /--shadow-card:\s*var\(--shadow-raised\)/);
   assert.match(effect, /--shadow-input:\s*var\(--shadow-recessed\)/);
   assert.match(css, /html\[data-theme="neumorphic"\] \.tab-bar\s*\{\s*box-shadow:\s*var\(--shadow-raised\)/);
-  assert.match(css, /\.mode-button\[aria-pressed="true"\],\s*\.appearance-option:has\(input:checked\)\s*\)\s*\{\s*box-shadow:\s*var\(--shadow-recessed\)/);
+  // 선택 표시가 없는 세그먼트만 버튼에 오목한 그림자를 주고, 표시가 있으면 그림자는 표식(::before)이 맡는다.
+  // instant에서는 표식이 보이지 않으므로 ready일 때만 그림자를 표식으로 옮긴다.
+  assert.match(css, /\.mode-group:not\(\[data-indicator="ready"\]\) \.mode-button\[aria-pressed="true"\],\s*\.appearance-option:has\(input:checked\)\s*\)\s*\{\s*box-shadow:\s*var\(--shadow-recessed\)/);
+  assert.doesNotMatch(css, /[,(]\s*\.mode-button\[aria-pressed="true"\],/, "표식과 버튼에 그림자가 겹치지 않는다");
+  assert.match(css, /html\[data-theme="neumorphic"\] \.mode-group\[data-indicator="ready"\]::before\s*\{\s*box-shadow:\s*var\(--shadow-recessed\)/);
+});
+
+// ---- 답변 모드·아래 탭 선택 표시 ----
+
+// 선택자는 규칙 첫 줄에서 찾는다. ".tab-bar[data-indicator]::before {"는 묶음 규칙의 둘째 줄에도 있으므로
+// 앞 줄이 쉼표로 끝나는 자리는 건너뛴다.
+function indicatorCss() {
+  const css = read("assets/app.css").replace(/\r\n/g, "\n").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = (selector) => {
+    const needle = `\n${selector} {`;
+    let at = css.indexOf(needle);
+    while (at >= 0 && css.slice(0, at).trimEnd().endsWith(",")) at = css.indexOf(needle, at + 1);
+    assert.ok(at >= 0, selector);
+    return css.slice(at, css.indexOf("}", at));
+  };
+  return { css, rule };
+}
+
+const toMs = (value) => {
+  const [, n, unit] = value.trim().match(/^(\d+(?:\.\d+)?)(ms|s)$/) ?? [];
+  assert.ok(n, `시간 값: ${value}`);
+  return Number(n) * (unit === "s" ? 1000 : 1);
+};
+
+test("선택 표시: data-indicator가 없으면 ::before를 만들지 않아 지금 모양 그대로다", () => {
+  const { css, rule } = indicatorCss();
+  // 기본 규칙은 그대로 남는다.
+  assert.match(rule('.mode-button[aria-pressed="true"]'), /background:\s*var\(--color-school-blue\)/);
+  assert.match(rule('.mode-deep[aria-pressed="true"]'), /background:\s*var\(--color-yellow\)/);
+  assert.match(rule('.tab[aria-current="page"]'), /border-top-color:\s*var\(--color-school-blue\)/);
+  // 표식 content는 [data-indicator] 아래에서만 만든다.
+  for (const [, selector] of css.matchAll(/([^{}]*::before[^{}]*)\{[^{}]*content:/g)) {
+    if (!/mode-group|tab-bar/.test(selector)) continue;
+    for (const part of selector.split(",")) assert.match(part, /\[data-indicator\]::before/, part.trim());
+  }
+  const mark = rule(".mode-group[data-indicator]::before,\n.tab-bar[data-indicator]::before");
+  assert.match(mark, /content:\s*""/);
+  assert.match(mark, /position:\s*absolute/);
+  assert.match(mark, /left:\s*var\(--indicator-left, 0px\);\s*right:\s*var\(--indicator-right, 0px\);/);
+  assert.match(mark, /pointer-events:\s*none/);
+  assert.match(mark, /z-index:\s*-1/, "표식은 버튼 글자 아래에 그린다");
+  const group = rule(".mode-group");
+  assert.match(group, /position:\s*relative/);
+  assert.match(group, /isolation:\s*isolate/, "z-index -1 표식이 세그먼트 바탕 밑으로 빠지지 않는다");
+  // 아래 탭: 고정된 .tab-bar 자신이 표식의 기준 상자다. fixed도 relative처럼 절대 위치 ::before를 padding 상자에
+  // 놓고, z-index: 3이 표식(z-index: -1)의 쌓임 맥락을 만든다. 래퍼를 두지 않고 relative로 덮지도 않는다.
+  assert.match(rule(".tab-bar"), /position:\s*fixed;\s*right:\s*0;\s*bottom:\s*0;\s*left:\s*0;\s*z-index:\s*3;/);
+  assert.doesNotMatch(css, /tab-dock/, "래퍼 규칙을 두지 않는다");
+  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!/position:\s*(?:relative|static|absolute|sticky)/.test(body)) continue;
+    for (const part of selector.split(",").map((text) => text.trim())) {
+      assert.doesNotMatch(part, /\.tab-bar$/, `탭 막대의 fixed를 덮지 않는다: ${part}`);
+    }
+  }
+  // 전환 도중 방향이 어긋나 두 끝이 교차해도 표식이 0폭으로 사라지지 않는다. 안착 폭(버튼 44px, 320px 화면 탭 64px)보다 작다.
+  const minWidth = Number(mark.match(/min-width:\s*(\d+)px/)?.[1]);
+  assert.ok(minWidth > 0 && minWidth < 44, `표식 최소 폭 ${minWidth}px`);
+  assert.match(rule(".tab-bar[data-indicator]::before"), /top:\s*0;\s*height:\s*3px;\s*background:\s*var\(--color-school-blue\)/);
+  assert.match(rule('.tab-bar[data-indicator="ready"] .tab[aria-current="page"]'), /border-top-color:\s*transparent/);
+  const pressed = rule('.mode-group[data-indicator="ready"] .mode-button[aria-pressed="true"]');
+  assert.match(pressed, /background:\s*transparent;\s*border-color:\s*transparent;/);
+  // instant: 표식은 좌표에만 미리 놓이고 보이지 않으며, 버튼 채움과 탭 위 선은 기존 규칙 그대로다.
+  assert.match(mark, /opacity:\s*0/);
+  assert.match(rule('.mode-group[data-indicator="ready"]::before,\n.tab-bar[data-indicator="ready"]::before'), /opacity:\s*1/);
+  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    for (const part of selector.split(",").map((text) => text.trim())) {
+      if (!/\.(?:mode-group|tab-bar)\[data-indicator/.test(part)) continue;
+      // 표식 안쪽 버튼·탭을 바꾸는 규칙(기존 채움·글자색·위 선 덮어쓰기)은 ready에서만 건다.
+      // 버튼 자체 전환을 끄는 규칙은 instant에도 걸려야 하므로 예외다.
+      if (/\s\.(?:mode-button|mode-deep|tab)(?![\w-])/.test(part) && body.trim() !== "transition: none;") {
+        assert.match(part, /\[data-indicator="ready"\]/, `instant에서 기존 강조를 바꾸지 않는다: ${part}`);
+      }
+      if (/opacity:\s*1/.test(body)) assert.match(part, /\[data-indicator="ready"\]/, `표식은 ready에서만 보인다: ${part}`);
+    }
+  }
+  // 세그먼트 색은 :has로만 고르고 모드용 속성을 따로 두지 않는다.
+  assert.match(rule('.mode-group[data-indicator]:has(.mode-deep[aria-pressed="true"])::before'), /border-color:\s*var\(--color-text\)/);
+  assert.doesNotMatch(css, /data-indicator-mode|data-mode=/);
+  // 표식 규칙은 기존 변수만 쓴다.
+  const block = css.slice(css.indexOf(".mode-group,\n.tab-bar {"), css.indexOf(".qa-defs {"));
+  assert.doesNotMatch(block, /#[\da-f]{3,8}\b|rgba?\(|url\(|gradient|backdrop-filter/i);
+  // 글자 굵기가 바뀌면 버튼 폭이 달라져 잰 좌표와 어긋난다.
+  assert.doesNotMatch(block, /font-weight/);
+});
+
+// 표식은 JS가 data-indicator를 붙이는 그 탭 막대의 ::before다. 마크업에 탭 막대가 하나뿐이고 body 바로 아래에
+// 있어야 fixed 기준 상자와 표식 좌표(getBoundingClientRect 차이)가 같은 상자를 가리킨다.
+test("선택 표시: 아래 탭 표식은 마크업의 고정 탭 막대 하나 안에서 그린다", () => {
+  const html = read("index.html").replace(/\r\n/g, "\n");
+  assert.equal((html.match(/class="tab-bar"/g) ?? []).length, 1);
+  assert.match(html, /<\/main>\s*<nav class="tab-bar"[^>]*>[\s\S]*?<\/nav>/, "본문 다음 body 바로 아래의 nav");
+  assert.doesNotMatch(html, /tab-dock/);
+  const tabs = html.match(/<nav class="tab-bar"[^>]*>([\s\S]*?)<\/nav>/)[1];
+  assert.equal((tabs.match(/<a class="tab"/g) ?? []).length, 5, "다섯 탭 말고 표식용 요소를 더하지 않는다");
+});
+
+test("선택 표시: 가는 쪽 모서리가 먼저 출발하고 지연과 시간의 합이 300ms 미만이다", () => {
+  const { css, rule } = indicatorCss();
+  const tokens = rule(".mode-group,\n.tab-bar");
+  const duration = toMs(tokens.match(/--indicator-duration:\s*([^;]+);/)[1]);
+  const lag = toMs(tokens.match(/--indicator-lag:\s*([^;]+);/)[1]);
+  const trailMs = toMs(tokens.match(/--indicator-trail:\s*([^;]+);/)[1]);
+  // 뒤 모서리는 지연(lag)을 두고 출발한다. 지연과 시간의 합은 300ms 미만이고, 앞 모서리보다 늦게 끝난다.
+  assert.ok(lag > 0 && duration > 0 && lag + duration < 300, `${lag} + ${duration}ms`);
+  assert.ok(lag + trailMs < 300 && lag + trailMs > duration, `뒤 모서리 ${lag} + ${trailMs}ms`);
+  // 지연이 길면 방향이 어긋난 재선택에서 멈춘 끝이 오래 추월당하므로 앞 모서리 시간의 1/4 이하로 둔다.
+  assert.ok(lag <= duration / 4, `지연 ${lag}ms`);
+  const ease = tokens.match(/--indicator-ease:\s*cubic-bezier\(([^)]+)\)/)?.[1].split(",").map(Number);
+  assert.ok(ease?.length === 4, "기본 곡선은 cubic-bezier");
+  assert.ok(ease[0] < ease[1] && ease[3] === 1, "처음이 빠른 ease-out");
+
+  const transitionOf = (selector) => Object.fromEntries(rule(selector).match(/transition:\s*([^;]+);/)[1]
+    .split(/,\s*(?![^()]*\))/).map((part) => part.trim().split(/\s+/)).map(([prop, ...rest]) => [prop, rest.join(" ")]));
+  const both = (suffix) => `.mode-group[data-indicator="ready"]${suffix}::before,\n.tab-bar[data-indicator="ready"]${suffix}::before`;
+  const lead = "var(--indicator-duration) var(--indicator-ease)";
+  // 뒤 모서리: --indicator-lag 지연 뒤 --indicator-trail 동안 움직인다.
+  const trail = "var(--indicator-trail) var(--indicator-ease) var(--indicator-lag)";
+  assert.deepEqual(transitionOf(both("")), { left: lead, right: lead, "border-color": "var(--indicator-duration) ease-out" });
+  assert.deepEqual(transitionOf(both('[data-indicator-dir="forward"]')),
+    { left: trail, right: lead, "border-color": "var(--indicator-duration) ease-out" }, "오른쪽으로: 오른쪽 끝이 먼저");
+  assert.deepEqual(transitionOf(both('[data-indicator-dir="back"]')),
+    { left: lead, right: trail, "border-color": "var(--indicator-duration) ease-out" }, "왼쪽으로: 왼쪽 끝이 먼저");
+  // 전환은 ready에서만 건다. instant와 표시 없음은 바로 놓인다.
+  for (const [, selector] of css.matchAll(/([^{}]+)\{[^{}]*transition:[^{}]*--indicator/g)) {
+    for (const part of selector.split(",")) assert.match(part, /\[data-indicator="ready"\]/, part.trim());
+  }
+  // 사용자 지정 속성 대신 left·right를 전환하므로 @property 등록이 필요 없다.
+  assert.doesNotMatch(css, /@property/);
+  // 방향이 없는 ready 규칙은 두 모서리를 같이 옮기고, 지연은 방향 규칙의 뒤 모서리에만 있다.
+  const delayed = [...css.matchAll(/([^{}]+)\{[^{}]*var\(--indicator-lag\)[^{}]*\}/g)]
+    .flatMap(([, selector]) => selector.split(",").map((part) => part.trim()));
+  assert.ok(delayed.length === 4 && delayed.every((part) => /\[data-indicator-dir="(?:forward|back)"\]/.test(part)), delayed.join(" | "));
+});
+
+// cubic-bezier(x1, y1, x2, y2)를 이분법으로 푼다(x가 단조 증가하므로 수렴한다).
+function cubicBezier(x1, y1, x2, y2) {
+  const bez = (a, b, t) => 3 * (1 - t) ** 2 * t * a + 3 * (1 - t) * t ** 2 * b + t ** 3;
+  return (x) => {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    let [lo, hi] = [0, 1];
+    for (let i = 0; i < 60; i += 1) {
+      const mid = (lo + hi) / 2;
+      if (bez(x1, x2, mid) < x) lo = mid; else hi = mid;
+    }
+    return bez(y1, y2, (lo + hi) / 2);
+  };
+}
+
+// CSS linear(값 위치%, …)를 구간 선형 보간으로 옮긴다. 첫 점은 0%, 마지막 점은 100%다.
+function linearEasing(source) {
+  const raw = source.split(",").map((part) => part.trim().split(/\s+/));
+  const points = raw.map(([value, at], index) => [Number(value),
+    at === undefined ? (index === 0 ? 0 : 1) : Number.parseFloat(at) / 100]);
+  return (x) => {
+    if (x <= 0) return points[0][0];
+    if (x >= 1) return points.at(-1)[0];
+    const i = points.findIndex(([, at], index) => index > 0 && at >= x);
+    const [[v0, a0], [v1, a1]] = [points[i - 1], points[i]];
+    return v0 + (v1 - v0) * ((x - a0) / (a1 - a0));
+  };
+}
+
+test("선택 표시: 전환 도중 다시 고르면 맞는 방향은 늘어나고, 어긋난 방향도 표식이 사라지지 않는다", () => {
+  const { css, rule } = indicatorCss();
+  const tokens = rule(".mode-group,\n.tab-bar");
+  const duration = toMs(tokens.match(/--indicator-duration:\s*([^;]+);/)[1]);
+  const lag = toMs(tokens.match(/--indicator-lag:\s*([^;]+);/)[1]);
+  const trailMs = toMs(tokens.match(/--indicator-trail:\s*([^;]+);/)[1]);
+  const minWidth = Number(rule(".mode-group[data-indicator]::before,\n.tab-bar[data-indicator]::before")
+    .match(/min-width:\s*(\d+)px/)[1]);
+  const eases = {
+    "cubic-bezier": cubicBezier(...tokens.match(/cubic-bezier\(([^)]+)\)/)[1].split(",").map(Number)),
+    "linear() 스프링": linearEasing(css.match(/--indicator-ease:\s*linear\(([^)]+)\)/)[1]),
+  };
+  // CSS 규칙을 그대로 옮긴다: 앞 모서리는 지연 없이 duration, 뒤 모서리(forward는 left, back은 right)는
+  // lag 지연 뒤 trail 동안 움직인다. 지연 중인 끝은 전환 시작 값에 머문다.
+  const lead = { delay: 0, ms: duration };
+  const behind = { delay: lag, ms: trailMs };
+  const timing = (dir) => ({ left: dir === "forward" ? behind : lead, right: dir === "back" ? behind : lead });
+  // 320px 화면의 다섯 탭(각 64px). 표식 좌표는 탭 막대 안쪽 경계에서의 left·right다.
+  const container = 320;
+  const tab = (index) => ({ left: 64 * index, right: container - 64 * (index + 1) });
+  // widths는 left·right로 계산한 폭이다(CSS min-width가 걸기 전 값). travel은 마지막 선택의 가장 긴 모서리 이동량이다.
+  const run = (ease, steps) => {
+    let edges = null;
+    const widths = [];
+    let travel = 0;
+    let now = 0;
+    for (const { at, from, to, dir } of steps) {
+      for (; edges && now < at; now += 1) widths.push(container - edges.left(now) - edges.right(now));
+      const start = edges ? { left: edges.left(at), right: edges.right(at) } : from;
+      const { left, right } = timing(dir);
+      const move = (a, b, { delay, ms }) => (t) => a + (b - a) * ease(Math.min(1, Math.max(0, (t - at - delay) / ms)));
+      edges = { left: move(start.left, to.left, left), right: move(start.right, to.right, right) };
+      travel = Math.max(Math.abs(to.left - start.left), Math.abs(to.right - start.right));
+    }
+    for (const end = now + lag + trailMs + 40; now <= end; now += 1) widths.push(container - edges.left(now) - edges.right(now));
+    return { widths, travel };
+  };
+  for (const [name, ease] of Object.entries(eases)) {
+    // 예전 재현: 홈 → 더보기 전환 15ms 뒤 일정. 최신 재현: 같은 흐름에서 한 프레임(16ms) 뒤 일정.
+    // 표식은 일정 왼쪽에 있으므로 맞는 방향은 forward이고, 직전 목표(더보기) 기준으로 잘못 정하면 back이다.
+    for (const at of [15, 16]) {
+      const steps = (dir) => [{ at: 0, from: tab(0), to: tab(4), dir: "forward" }, { at, to: tab(3), dir }];
+      // 맞는 방향(forward, 표식이 일정 왼쪽에 있으므로 오른쪽으로 간다): 늦은 끝(left)이 뒤따라 표식이 일정 폭보다
+      // 좁아지지 않는다. 스프링 넘침(1.5%)만큼만 허용한다. 실제 방향 판정은 동작 모듈 테스트가 맡는다.
+      const right = run(ease, steps("forward"));
+      const afterRight = Math.min(...right.widths.slice(at));
+      assert.ok(afterRight >= 64 - 0.02 * right.travel,
+        `${name} ${at}ms 뒤 forward: 늘어나는 쪽이어야 하는데 ${afterRight.toFixed(1)}px까지 좁아짐`);
+      assert.ok(Math.max(...right.widths.slice(at)) > 64 + 2, `${name} ${at}ms 뒤 forward: 늘어남이 보인다`);
+      assert.ok(Math.abs(right.widths.at(-1) - 64) < 0.01, `${name} ${at}ms 뒤 forward: 일정 탭 64px에 안착`);
+      // 잘못 정한 방향(back, 직전 목표 기준)은 동작 모듈 결함이다. 앞 모서리가 지연 중인 뒤 모서리 쪽으로 다가가
+      // 계산 폭이 줄 수 있으므로, CSS는 min-width로 그 폭을 받친다(렌더링 폭 = max(계산 폭, min-width)).
+      const wrong = run(ease, steps("back"));
+      const rendered = Math.min(...wrong.widths.map((width) => Math.max(width, minWidth)));
+      assert.ok(rendered >= minWidth, `${name} ${at}ms 뒤 back: 렌더링 폭 ${rendered.toFixed(1)}px`);
+      assert.ok(afterRight > Math.min(...wrong.widths.slice(at)), `${name} ${at}ms 뒤: 맞는 방향이 잘못된 방향보다 넓다`);
+      assert.ok(Math.abs(wrong.widths.at(-1) - 64) < 0.01, `${name} ${at}ms 뒤 back: 일정 탭 64px에 안착`);
+    }
+    // 맞는 방향의 한 칸 이동은 늘어났다가 안착 폭으로 돌아온다.
+    const stretch = run(ease, [{ at: 0, from: tab(0), to: tab(1), dir: "forward" }]).widths;
+    assert.ok(Math.max(...stretch) > 64 + 2, `${name} 한 칸 이동 최대 폭 ${Math.max(...stretch).toFixed(1)}px`);
+    assert.ok(Math.abs(stretch.at(-1) - 64) < 0.01);
+  }
+});
+
+test("선택 표시: linear() 스프링은 @supports 안에서만 쓰고 넘침이 작다", () => {
+  const { css } = indicatorCss();
+  const supports = [...css.matchAll(/@supports \(transition-timing-function: linear\(0, 1\)\)\s*\{([\s\S]*?)\n\}/g)];
+  assert.equal(supports.length, 1);
+  const inside = supports[0][1];
+  assert.match(inside, /^\s*\.mode-group,\s*\.tab-bar\s*\{/);
+  const outside = css.replace(supports[0][0], "");
+  assert.doesNotMatch(outside, /linear\(/, "@supports 밖에는 linear()가 없다");
+  const points = inside.match(/--indicator-ease:\s*linear\(([^)]+)\)/)[1].split(",").map((part) => part.trim().split(/\s+/));
+  assert.deepEqual(points[0], ["0"]);
+  assert.deepEqual(points.at(-1), ["1"]);
+  const stops = points.slice(1, -1).map(([, at]) => Number.parseFloat(at));
+  assert.ok(stops.every((at, index) => at > 0 && at < 100 && (index === 0 || at > stops[index - 1])), "위치는 오름차순");
+  const values = points.map(([value]) => Number(value));
+  // 넘침 2% 이하: 가장 긴 이동(약 100px)에서도 세그먼트 안쪽 여백 3px 안이다.
+  assert.ok(Math.max(...values) > 1 && Math.max(...values) <= 1.02, `${Math.max(...values)}`);
+  assert.ok(Math.min(...values) >= 0);
+});
+
+test("선택 표시: 움직임 줄이기 전역 규칙이 ::before 전환을 끈다", () => {
+  const { css } = indicatorCss();
+  const reduced = css.match(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\*,\s*\*::before,\s*\*::after\s*\{([^}]*)\}/)?.[1] ?? "";
+  assert.match(reduced, /transition:\s*none !important/);
+});
+
+test("선택 표시: 안착과 전환 중 글자 4.5:1, 표식 경계 3:1을 라이트·다크·음각양각에서 지킨다", () => {
+  const { css, rule } = indicatorCss();
+  const value = (selector, prop) => rule(selector).match(new RegExp(`(?:^|[\\s;{])${prop}:\\s*([^;]+);`))?.[1].trim();
+  const groupBack = value(".mode-group", "background");
+  const fill = value(".mode-group[data-indicator]::before", "background");
+  const fastEdge = value(".mode-group[data-indicator]::before", "border").replace(/^2px solid\s+/, "");
+  const deepEdge = value('.mode-group[data-indicator]:has(.mode-deep[aria-pressed="true"])::before', "border-color");
+  const fastInk = value('.mode-group[data-indicator="ready"] .mode-button[aria-pressed="true"]', "color");
+  const deepInk = value('.mode-group[data-indicator="ready"] .mode-deep[aria-pressed="true"]', "color");
+  // 움직이는 2px 좌우 경계는 같은 색 글자 뒤를 지나간다. 글자 획을 채움색 1px 테두리로 감싸 경계선과 떼어 놓으므로
+  // 겹치는 순간에도 글자는 채움색 위의 대비(아래 반복문)를 유지한다.
+  const halo = value('.mode-group[data-indicator="ready"] .mode-button', "text-shadow")?.replace(/\s+/g, " ");
+  assert.equal(halo, [["-1px", "0"], ["1px", "0"], ["0", "-1px"], ["0", "1px"]].map(([x, y]) => `${x} ${y} ${fill}`).join(", "),
+    "네 방향 1px 테두리는 표식 채움색");
+  // 최종 색만 맞으면 부족하다. instant↔ready를 오갈 때 버튼 채움(강조색↔투명)과 글자색(on-accent↔강조색)이
+  // 섞이는 중간값은 어느 조합과도 대비가 맞지 않으므로, 표식이 붙은 세그먼트의 버튼은 전환 없이 한 번에 바뀐다.
+  assert.match(value(".mode-button", "transition") ?? "", /background-color/, "표시 없는 기존 모양은 그대로");
+  assert.equal(value(".mode-group[data-indicator] .mode-button", "transition"), "none");
+  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!/transition:/.test(body) || /transition:\s*none/.test(body)) continue;
+    for (const part of selector.split(",").map((text) => text.trim())) {
+      assert.doesNotMatch(part, /\[data-indicator[^\]]*\][^,]*\s\.mode-(?:button|deep)/, `버튼 전환을 다시 켜지 않는다: ${part}`);
+    }
+  }
+  const edgeWidth = Number(rule(".mode-group[data-indicator]::before").match(/border:\s*(\d+)px/)?.[1]);
+  assert.ok(edgeWidth <= 2, `경계 ${edgeWidth}px`);
+  const idleInk = value(".mode-button", "color");
+  const tabBack = value(".tab-bar", "background");
+  const tabLine = value(".tab-bar[data-indicator]::before", "background");
+  const tabInk = value('.tab[aria-current="page"]', "color");
+  const tabIdle = value(".tab", "color");
+  // 음각양각은 그림자만 바꾸고 색 토큰을 다시 정의하지 않으므로 라이트·다크 대비가 그대로 적용된다.
+  // (var(--color-*) 참조는 허용하고 --color-*: 선언만 막는다.)
+  const effect = css.match(/html\[data-theme="neumorphic"\]\s*\{([^{}]*)\}/)?.[1] ?? "";
+  assert.match(effect, /--shadow-input:/, "음각양각 블록을 찾았다");
+  assert.doesNotMatch(effect, /(?:^|[\s;{])--color-[\w-]+\s*:/);
+  for (const [mode, resolve] of palettes()) {
+    // 전환 중 표식은 새로 고른 버튼 아래에 아직 없고 떠나는 버튼 아래에 남는다. 그래서 모든 버튼 글자를 두 면 모두에서 본다.
+    for (const face of [groupBack, fill]) {
+      for (const ink of [fastInk, deepInk, idleInk]) assertContrast(resolve(ink), resolve(face), 4.5, `${mode} ${ink} on ${face}`);
+      for (const edge of [fastEdge, deepEdge]) assertContrast(resolve(edge), resolve(face), 3, `${mode} edge ${edge} on ${face}`);
+    }
+    assertContrast(resolve(tabLine), resolve(tabBack), 3, `${mode} tab line`);
+    for (const ink of [tabInk, tabIdle]) assertContrast(resolve(ink), resolve(tabBack), 4.5, `${mode} tab ${ink}`);
+    // 빠르게와 깊이 생각의 경계색은 서로 달라야 모드가 구분된다.
+    assert.notEqual(resolve(fastEdge), resolve(deepEdge), `${mode} 모드 경계색`);
+  }
+});
+
+test("선택 표시: 설계 문서에 웹 화면이 맞출 시간·곡선·토큰과 와이어프레임을 적는다", () => {
+  const design = readFileSync(new URL("../docs/DESIGN.md", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const at = design.indexOf("## 답변 모드·아래 탭 선택 표시");
+  assert.ok(at >= 0, "설계 절");
+  const next = design.indexOf("\n## ", at + 1);
+  const section = design.slice(at, next === -1 ? undefined : next);
+  const { rule, css } = indicatorCss();
+  const tokens = rule(".mode-group,\n.tab-bar");
+  for (const name of ["duration", "lag", "trail"]) {
+    const declared = tokens.match(new RegExp(`--indicator-${name}:\\s*([^;]+);`))[1].trim();
+    assert.ok(section.includes(`\`--indicator-${name}: ${declared}\``), `${name} ${declared}`);
+  }
+  assert.ok(section.includes(tokens.match(/--indicator-ease:\s*([^;]+);/)[1].trim()), "기본 곡선");
+  const spring = css.match(/--indicator-ease:\s*(linear\([^)]+\))/)[1].replace(/\s+/g, " ");
+  assert.ok(section.replace(/\s+/g, " ").includes(spring), "스프링 점");
+  for (const word of ["data-indicator", "data-indicator-dir", "--indicator-left", "--indicator-right", "instant", "ready", "forward", "back"]) {
+    assert.ok(section.includes(word), word);
+  }
+  assert.match(section, /```text[\s\S]*빠르게[\s\S]*깊이 생각[\s\S]*```/, "와이어프레임");
 });
