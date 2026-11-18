@@ -232,6 +232,10 @@ test("달력 분류 칩과 주말 틴트 토큰은 세 색 블록에 있고 대�
       assertContrast(resolve(`cal-${name}-ink`), resolve(`cal-${name}-bg`), 4.5, `${label} ${name} chip`);
       assertContrast(resolve(`cal-${name}-ink`), card, 3, `${label} ${name} dot on card`);
       assertContrast(resolve(`cal-${name}-ink`), resolve("cal-weekend"), 3, `${label} ${name} dot on weekend`);
+      // 막대 채움은 칸 배경과 거의 같아(금~일 등록 일정의 토요일 칸 약 1.02:1) 경계는 글자색 외곽선이 맡는다.
+      for (const [face, back] of [["card", card], ["weekend", resolve("cal-weekend")]]) {
+        assertContrast(resolve(`cal-${name}-ink`), back, 3, `${label} ${name} bar outline on ${face}`);
+      }
     }
     for (const ink of ["text", "text-muted"]) {
       assertContrast(resolve(ink), resolve("cal-weekend"), 4.5, `${label} ${ink} on weekend tint`);
@@ -255,6 +259,11 @@ test("달력 격자는 9% 헤어라인과 대체 경계를 쓰고 좁은 화면�
   assert.match(rule(".calendar-month"), /overflow-x:\s*auto/);
   const smallest = [...css.matchAll(/@media \(max-width: 380px\)\s*\{([\s\S]*?)\n\}/g)].map(([, body]) => body).join("\n");
   assert.match(smallest, /\.calendar-month\s*\{\s*margin-inline:\s*calc\(var\(--gap\) \* -1\);\s*border-inline-width:\s*0;/);  assert.match(rule(".calendar-bars"), /pointer-events:\s*none/, "막대는 칸 누르기를 막지 않는다");
+  const bar = rule(".calendar-bar");
+  assert.match(bar, /border:\s*1px solid var\(--cal-ink, var\(--color-cal-other-ink\)\)/, "막대 기간 경계는 분류 글자색 외곽선");
+  assert.match(bar, /line-height:\s*calc\(var\(--calendar-bar-height\) - 2px\)/, "외곽선 두께만큼 줄 높이를 줄인다");
+  assert.match(rule(".calendar-bar.is-continued-before"), /border-left-width:\s*0/);
+  assert.match(rule(".calendar-bar.is-continued-after"), /border-right-width:\s*0/);
   assert.match(rule(".calendar-day.is-weekend"), /background:\s*var\(--color-cal-weekend\)/);
   assert.match(rule(".calendar-day.is-outside"), /color:\s*var\(--color-text-muted\)/);
   assert.match(css, /\.calendar-day\.is-today > [^{]+\{[^}]*background:\s*var\(--color-school-blue\);[^}]*color:\s*var\(--color-on-accent\)/);

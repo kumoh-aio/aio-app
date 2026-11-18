@@ -1220,23 +1220,27 @@ a {
   padding: 0 6px;
   overflow: hidden;
   background: var(--cal-bg, var(--color-cal-other-bg));
+  /* 채움은 칸 배경과 거의 같은 밝기라, 기간 경계는 분류 글자색 외곽선(칸·주말 틴트 대비 3:1 이상)으로 그린다. */
+  border: 1px solid var(--cal-ink, var(--color-cal-other-ink));
   border-radius: 6px;
   color: var(--cal-ink, var(--color-cal-other-ink));
   font-size: 12px;
   font-weight: 600;
-  line-height: var(--calendar-bar-height);
+  line-height: calc(var(--calendar-bar-height) - 2px);
   white-space: nowrap;
   text-overflow: ellipsis;
 }
 
 .calendar-bar.is-continued-before {
   margin-left: 0;
+  border-left-width: 0;
   border-top-left-radius: 0;
   border-bottom-left-radius: 0;
 }
 
 .calendar-bar.is-continued-after {
   margin-right: 0;
+  border-right-width: 0;
   border-top-right-radius: 0;
   border-bottom-right-radius: 0;
 }
