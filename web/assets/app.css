@@ -840,6 +840,29 @@ a {
   justify-self: stretch;
 }
 
+/* 학사일정. 카드·상태·빈 상태·보조 버튼은 공통 규칙을 그대로 쓴다. */
+.calendar-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+}
+
+.calendar-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.calendar-event {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-left: 4px solid var(--color-sky);
+}
+
 @media (max-width: 380px) {
   .shortcut-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));

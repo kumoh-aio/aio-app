@@ -8,6 +8,7 @@ import { createChatHistory } from "./chat-history.mjs";
 import { mountChat, createPrefStorage, syncHomeMode } from "./chat-view.mjs";
 import { mountDemoLogin } from "./demo-login.mjs";
 import { mountGraduationDiagnosis } from "./graduation-view.mjs";
+import { mountCalendar } from "./calendar-view.mjs";
 
 const fetchImpl = globalThis.fetch.bind(globalThis);
 const api = createApi({ base: API_BASE, fetchImpl });
@@ -49,6 +50,15 @@ const demoLogin = mountDemoLogin({
   login: (studentId) => api.demoLogin(studentId),
   diagnosis,
 });
+// 학기 선택·재시도·늦은 응답 무시는 일정 모듈이 맡는다. 탭 진입 때는 refresh()만 부른다.
+const calendar = mountCalendar({
+  root: document.getElementById("calendar-root"),
+  doc: document,
+  fetchImpl,
+  base: API_BASE,
+  initialYear: 2027,
+  initialTerm: 1,
+});
 
 let home = null;
 let firstRender = true;
@@ -69,6 +79,7 @@ function showView({ route, state }) {
   // 아이오에서 바꾼 모드를 홈 표시에도 반영한다.
   if (route === "home") syncHomeMode({ home, root: homeRoot, storage: prefs });
   if (route === "graduation") demoLogin.refresh();
+  if (route === "calendar") calendar.refresh();
 }
 
 const router = createRouter({ win: window, onRoute: showView });

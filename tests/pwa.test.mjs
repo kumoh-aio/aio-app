@@ -12,7 +12,7 @@ const generatedIcons = new Map([
 const files = ["./", "index.html", "manifest.webmanifest", "assets/app.css", "assets/app.js",
   "assets/home.mjs", "assets/router.mjs", "assets/config.mjs", "assets/api.mjs",
   "assets/chat-view.mjs", "assets/chat-client.mjs", "assets/chat-history.mjs",
-  "assets/demo-login.mjs", "assets/graduation-view.mjs",
+  "assets/demo-login.mjs", "assets/graduation-view.mjs", "assets/calendar-view.mjs",
   ...generatedIcons.keys()];
 const requireFullShell = process.env.AIO_REQUIRE_FULL_SHELL === "1";
 const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/home.mjs", "assets/router.mjs",
@@ -20,8 +20,8 @@ const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/ho
 const requireScreen = requireFullShell || screenFiles.some((file) => existsSync(new URL(file, webRoot)));
 // 작업 A(다른 브랜치)가 만드는 모듈. 이 체크아웃에 없을 때만 건너뛴다(AIO_REQUIRE_FULL_SHELL=1이면 필수).
 const taskAFiles = ["assets/chat-client.mjs", "assets/chat-history.mjs"];
-// 작업 B의 진단 화면은 통합 브랜치에서 함께 검사한다.
-const taskBFiles = ["assets/graduation-view.mjs"];
+// 작업 B의 진단 화면과 일정 모듈은 통합 브랜치에서 함께 검사한다.
+const taskBFiles = ["assets/graduation-view.mjs", "assets/calendar-view.mjs"];
 
 function crc32(bytes) {
   let crc = 0xffffffff;
@@ -59,7 +59,8 @@ function worker(scope = "https://example.invalid/app/") {
     self: { registration: { scope }, addEventListener: (name, handler) => { events[name] = handler; },
       clients: { claim: async () => { calls.claimed += 1; } } },
     caches: { open: async (name) => { calls.opened.push(name); return cache; },
-      keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "unrelated"],
+      keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4",
+        "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
     fetch: async (request) => { calls.fetched.push(request); return "network"; },
   });
@@ -120,15 +121,15 @@ test("precache files exist or are generated icons", async () => {
   }
 });
 
-test("activate removes only older app caches and keeps CACHE_NAME v3", async () => {
+test("activate removes v3 and older app caches and keeps CACHE_NAME v4", async () => {
   const { events, calls } = worker();
   let pending;
   events.install({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.opened, ["aio-shell-v3"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v4"]);
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.deleted, ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2"]);
+  assert.deepEqual(calls.deleted, ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3"]);
   assert.equal(calls.claimed, 1);
 });
 
@@ -144,6 +145,8 @@ test("API, foreign origin, POST and unlisted URLs never touch caches or respondW
     ["https://kumoh-campus.onrender.com/api/v1/demo-students", "GET"],
     ["https://kumoh-campus.onrender.com/api/v1/demo-login", "POST"],
     ["https://kumoh-campus.onrender.com/api/v1/graduation-demo?student_id=demo-d02", "GET"],
+    ["https://example.invalid/app/api/v1/academic-calendar/2027/1", "GET"],
+    ["https://kumoh-campus.onrender.com/api/v1/academic-calendar/2027/1", "GET"],
     ["https://elsewhere.invalid/app/index.html", "GET"],
     ["https://example.invalid/app/index.html", "POST"],
     ["https://example.invalid/app/unknown.html", "GET"],
@@ -168,8 +171,9 @@ test("listed GET uses shell cache and falls back to network on miss", async () =
   assert.equal(calls.fetched.length, 1);
 });
 
-test("graduation tab connects demo login and diagnosis with a general chat question", async () => {
-  const calls = { refresh: 0, moves: [], students: 0, login: [], diagnosis: [] };
+// app.js의 import 줄을 걷어 내고 모듈 함수를 스텁으로 넣어 부팅한다. 네트워크와 저장소는 쓰지 않는다.
+function bootApp(startRoute) {
+  const calls = { refresh: 0, calendarRefresh: 0, moves: [], students: 0, login: [], diagnosis: [] };
   const roots = new Map();
   const doc = {
     getElementById(id) {
@@ -178,12 +182,12 @@ test("graduation tab connects demo login and diagnosis with a general chat quest
     },
     querySelectorAll: () => [],
   };
-  let diagnosisOptions;
-  let loginOptions;
+  const options = {};
   const diagnosis = { show() {}, clear() {} };
+  const fetchStub = async () => assert.fail("unexpected network request");
   vm.runInNewContext(read("web/assets/app.js").toString().replace(/^import .*;\r?\n/gm, ""), {
     API_BASE: "https://example.invalid",
-    fetch: async () => assert.fail("unexpected network request"),
+    fetch: fetchStub,
     document: doc,
     window: {},
     navigator: {},
@@ -198,16 +202,53 @@ test("graduation tab connects demo login and diagnosis with a general chat quest
     mountChat: () => ({}),
     mountHome: () => ({}),
     syncHomeMode() {},
-    mountGraduationDiagnosis(options) { diagnosisOptions = options; return diagnosis; },
-    mountDemoLogin(options) {
-      loginOptions = options;
+    mountGraduationDiagnosis(opts) { options.diagnosis = opts; return diagnosis; },
+    mountDemoLogin(opts) {
+      options.login = opts;
       return { refresh() { calls.refresh += 1; } };
     },
-    createRouter: ({ onRoute }) => ({
-      start: () => onRoute({ route: "graduation" }),
-      navigate: (route, state) => calls.moves.push({ route, state }),
-    }),
+    mountCalendar(opts) {
+      options.calendar = opts;
+      return { refresh: async () => { calls.calendarRefresh += 1; } };
+    },
+    createRouter: ({ onRoute }) => {
+      options.onRoute = onRoute;
+      return {
+        start: () => onRoute({ route: startRoute }),
+        navigate: (route, state) => calls.moves.push({ route, state }),
+      };
+    },
   });
+  return { calls, roots, options, diagnosis, doc };
+}
+
+test("calendar tab mounts the calendar module once and refreshes on each entry", () => {
+  const { calls, roots, options, doc } = bootApp("home");
+  const mounted = options.calendar;
+  assert.equal(mounted.root, roots.get("calendar-root"));
+  assert.equal(mounted.doc, doc);
+  assert.equal(typeof mounted.fetchImpl, "function");
+  assert.equal(mounted.base, "https://example.invalid");
+  assert.equal(mounted.initialYear, 2027);
+  assert.equal(mounted.initialTerm, 1);
+  assert.equal(calls.calendarRefresh, 0, "home start must not fetch the calendar");
+  options.onRoute({ route: "calendar" });
+  assert.equal(calls.calendarRefresh, 1);
+  options.onRoute({ route: "graduation" });
+  assert.equal(calls.calendarRefresh, 1);
+  assert.equal(options.calendar, mounted, "mountCalendar runs only at boot");
+});
+
+test("index.html leaves only the calendar root in the calendar view", () => {
+  const html = read("web/index.html").toString();
+  const view = html.match(/<section[^>]*data-view="calendar"[\s\S]*?<\/section>/)?.[0] ?? "";
+  assert.match(view, /<div id="calendar-root"><\/div>/);
+  assert.doesNotMatch(view, /준비하고 있어요/);
+});
+
+test("graduation tab connects demo login and diagnosis with a general chat question", async () => {
+  const { calls, roots, options, diagnosis } = bootApp("graduation");
+  const { diagnosis: diagnosisOptions, login: loginOptions } = options;
   assert.equal(loginOptions.root, roots.get("graduation-login-root"));
   assert.equal(diagnosisOptions.root, roots.get("graduation-root"));
   assert.equal(loginOptions.diagnosis, diagnosis);
