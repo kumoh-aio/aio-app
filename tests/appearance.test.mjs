@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mountAppearance } from "../web/assets/appearance.mjs";
 
 const read = (path) => readFileSync(new URL(`../web/${path}`, import.meta.url), "utf8");
@@ -546,6 +546,33 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
       assertContrast(resolve("var(--color-control-border)"), resolve(back), 3, `${mode} bubble edge on ${back}`);
     }
   }
+});
+
+// 빠른 실행 링의 동작 모듈(quick-actions.mjs)은 다른 작업이 만든다. 결합된 체크아웃에서만 이 스타일과의 계약을 검사한다.
+function integratedQuickActions(t) {
+  const url = new URL("../web/assets/quick-actions.mjs", import.meta.url);
+  if (existsSync(url)) return readFileSync(url, "utf8");
+  t.skip("빠른 실행 링 동작 모듈이 아직 이 체크아웃에 합쳐지지 않았음");
+  return null;
+}
+
+test("통합 빠른 실행 링: 배치 함수가 라벨 자리를 .qa-item에 넘긴다", (t) => {
+  const source = integratedQuickActions(t);
+  if (source === null) return;
+  // CSS 기본 라벨 규칙은 호 배치용이다. 320×180 화면처럼 버블이 한 줄로 놓이면 라벨 줄은 배치 함수만 나눌 수 있으므로,
+  // 결합본은 라벨 좌표를 실제로 넘겨야 한다(좌표를 직접 넣는 스타일 테스트로는 전달 누락을 잡지 못한다).
+  for (const name of ["--qa-label-x", "--qa-label-y"]) {
+    assert.match(source, new RegExp(`setProperty\\(\\s*["'\`]${name}["'\`]`), `${name}를 넘긴다`);
+  }
+});
+
+test("통합 빠른 실행 링: 링 스타일을 담은 셸은 #29가 쓴 v10보다 새 캐시 판이다", (t) => {
+  const source = integratedQuickActions(t);
+  if (source === null) return;
+  // #29가 aio-shell-v10으로 먼저 배포됐다. 같은 판이면 설치된 PWA가 이전 index.html·app.css를 계속 내준다.
+  const worker = readFileSync(new URL("../web/sw.js", import.meta.url), "utf8");
+  const version = Number(worker.match(/CACHE_NAME\s*=\s*`\$\{CACHE_PREFIX\}v(\d+)`/)?.[1]);
+  assert.ok(version >= 11, `셸 캐시 판 v${version}`);
 });
 
 test("빠른 실행 링: 전환은 300ms 미만 ease-out이고 움직임 줄이기에서 꺼진다", () => {
