@@ -416,15 +416,19 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
   assert.match(item, /pointer-events:\s*none/, "닫힌 버블은 누를 수 없다");
   assert.doesNotMatch(item, /outline/, "포커스는 공통 외곽선을 쓴다");
 
-  // 버튼은 원점에 놓인 .qa-items 안에서 거리만큼, 채움은 화면 좌표의 원점+거리만큼 움직인다.
-  assert.match(rule(".qa-item"), /transform:\s*translate\(0px, 0px\) scale\(0\.4\)/, "버튼 닫힘");
-  assert.match(rule('.qa-ring[data-open="true"] .qa-item'),
-    /transform:\s*translate\(var\(--qa-x, 0px\), var\(--qa-y, 0px\)\) scale\(1\)/, "버튼 열림");
-  assert.match(rule(".qa-blob"),
-    /transform:\s*translate\(var\(--qa-origin-x, 0px\), var\(--qa-origin-y, 0px\)\) scale\(0\.4\)/, "채움 닫힘");
-  assert.match(rule('.qa-ring[data-open="true"] .qa-blob'),
-    /transform:\s*translate\(calc\(var\(--qa-origin-x, 0px\) \+ var\(--qa-x, 0px\)\),\s*calc\(var\(--qa-origin-y, 0px\) \+ var\(--qa-y, 0px\)\)\) scale\(1\)/,
-    "채움 열림");
+  // 버튼은 원점에 놓인 .qa-items 안에서, 채움은 viewBox로 원점이 트리거 중심에 맞춰진 SVG 안에서 움직인다.
+  // 두 레이어 모두 원점 기준이므로 같은 이동량만 쓰고, 채움에 원점을 다시 더하면 트리거 좌표만큼 밀린다.
+  const transformOf = (selector) => rule(selector).match(/transform:\s*([^;]+);/)?.[1].replace(/\s+/g, " ").trim();
+  for (const layer of [".qa-blob", ".qa-item"]) {
+    assert.equal(transformOf(layer), "translate(0px, 0px) scale(0.4)", `${layer} 닫힘`);
+    assert.equal(transformOf(`.qa-ring[data-open="true"] ${layer}`),
+      "translate(var(--qa-x, 0px), var(--qa-y, 0px)) scale(1)", `${layer} 열림`);
+  }
+  assert.equal(transformOf('.qa-ring[data-open="true"] .qa-blob'), transformOf('.qa-ring[data-open="true"] .qa-item'),
+    "채움과 버튼은 같은 자리로 펼쳐진다");
+  for (const selector of [".qa-blob", '.qa-ring[data-open="true"] .qa-blob']) {
+    assert.doesNotMatch(rule(selector), /--qa-origin/, `${selector}는 원점을 다시 더하지 않는다`);
+  }
   assert.match(rule('.qa-ring[data-open="true"] .qa-item'), /pointer-events:\s*auto/);
 
   const label = rule(".qa-label");

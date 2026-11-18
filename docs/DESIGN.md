@@ -186,7 +186,8 @@ Google Stitch로 만든 시안을 기준으로 한다. 내보낸 원본(HTML·�
 ```
 
 - 링은 화면 고정 레이어라 DOM에서 `+` 버튼 옆에 있을 필요가 없다(입력 행 뒤에 붙여도 된다). 배치 원점은 `+` 버튼의 `getBoundingClientRect()` 중심이고, 열 때와 화면 크기가 바뀔 때 다시 잰다.
-- 장식 SVG는 화면 전체 크기다. 크기 0인 바깥 SVG는 그려지지 않는다. SVG 좌표가 화면 px와 같으므로 채움은 `원점 + 거리`로 움직이고, 버튼은 원점에 놓인 `.qa-items` 안에서 거리만큼 움직인다.
+- 장식 SVG는 화면 전체 크기다. 크기 0인 바깥 SVG는 그려지지 않는다. viewBox는 `-원점x -원점y 화면폭 화면높이`라 SVG 좌표 1이 화면 1px이고 (0,0)이 트리거 중심이다.
+- 좌표 기준은 하나다. 채움은 SVG 안에서, 버튼은 원점에 놓인 `.qa-items` 안에서 둘 다 `--qa-x`·`--qa-y`만큼만 움직인다. 원점은 viewBox(채움)와 `.qa-items`의 `left/top`(버튼)이 한 번씩만 맡는다. 채움 변환에 원점을 다시 더하면 트리거 좌표만큼 오른쪽·아래로 밀린다.
 - 닫힌 링의 채움 레이어는 투명이라 `+` 버튼을 가리지 않는다.
 - 필터는 `index.html` 맨 끝(아이오 화면 구역 밖) 크기 0 SVG 안의 `<filter id="aio-goo" color-interpolation-filters="sRGB">`다. `feGaussianBlur stdDeviation="10"` 다음에 `feColorMatrix type="matrix"`의 알파 행 `0 0 0 19 -9`로 흐린 가장자리를 다시 날카롭게 자른다. 번진 부분이 잘리지 않게 필터 영역은 `x=-50% y=-50% width=200% height=200%`이다.
 - 필터는 SVG `<g filter>` 속성으로만 건다. CSS `filter: url()`은 쓰지 않는다. 필터를 정의한 SVG는 `display: none`으로 숨기지 않는다(일부 브라우저가 참조를 잃는다).

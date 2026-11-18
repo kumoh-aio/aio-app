@@ -1544,7 +1544,9 @@ html[data-theme="neumorphic"] :is(
 /* 아이오 빠른 실행 링. .qa-ring은 + 버튼과 떨어져 붙어도 되는 화면 고정 레이어다.
    --qa-origin-x·--qa-origin-y는 + 버튼 중심의 화면 좌표(getBoundingClientRect 기준 px)이고,
    --qa-x·--qa-y는 그 원점에서 버블 중심까지의 px 거리다.
-   장식 SVG(.qa-goo)는 화면 전체 크기라 SVG 좌표가 화면 px와 같다. 크기 0 SVG는 그려지지 않는다.
+   장식 SVG(.qa-goo)는 화면 전체 크기다(크기 0 SVG는 그려지지 않는다). JS가 viewBox를
+   "-원점x -원점y 화면폭 화면높이"로 두어 SVG 좌표 (0,0)이 이미 트리거 중심이므로,
+   채움(.qa-blob)은 버튼과 똑같이 --qa-x·--qa-y만큼만 움직이고 원점을 다시 더하지 않는다.
    goo 필터는 index.html의 #aio-goo를 SVG <g filter> 속성으로 걸고, 글자와 아이콘은 필터 밖 .qa-items에 둔다. */
 .qa-defs {
   position: absolute;
@@ -1594,7 +1596,7 @@ html[data-theme="neumorphic"] :is(
 
 .qa-blob {
   fill: var(--color-school-blue);
-  transform: translate(var(--qa-origin-x, 0px), var(--qa-origin-y, 0px)) scale(0.4);
+  transform: translate(0px, 0px) scale(0.4);
   transition: transform var(--qa-duration) var(--qa-ease);
 }
 
@@ -1625,8 +1627,7 @@ html[data-theme="neumorphic"] :is(
 }
 
 .qa-ring[data-open="true"] .qa-blob {
-  transform: translate(calc(var(--qa-origin-x, 0px) + var(--qa-x, 0px)),
-    calc(var(--qa-origin-y, 0px) + var(--qa-y, 0px))) scale(1);
+  transform: translate(var(--qa-x, 0px), var(--qa-y, 0px)) scale(1);
 }
 
 .qa-ring[data-open="true"] .qa-item {
