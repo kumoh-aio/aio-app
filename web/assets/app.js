@@ -11,6 +11,7 @@ import { mountGraduationDiagnosis } from "./graduation-view.mjs";
 import { mountCalendar } from "./calendar-view.mjs";
 import { mountAppearance } from "./appearance.mjs";
 import { createHandwritingPad } from "./handwriting-pad.mjs";
+import { createSelectionIndicator } from "./selection-indicator.mjs";
 
 const fetchImpl = globalThis.fetch.bind(globalThis);
 const api = createApi({ base: API_BASE, fetchImpl });
@@ -79,6 +80,17 @@ const calendar = mountCalendar({
 
 let home = null;
 let firstRender = true;
+const tabs = document.querySelectorAll("[data-tab]");
+const updateTabIndicator = createSelectionIndicator(document.querySelector(".tab-bar"), tabs);
+let clickedTab = null;
+
+for (const tab of tabs) {
+  tab.addEventListener("click", (event) => {
+    if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey
+      || event.altKey || event.shiftKey || tab.getAttribute("aria-current") === "page") return;
+    clickedTab = tab;
+  });
+}
 
 function showView({ route, state }) {
   if (route !== "aio") {
@@ -88,17 +100,24 @@ function showView({ route, state }) {
   for (const view of document.querySelectorAll("[data-view]")) {
     view.hidden = view.getAttribute("data-view") !== route;
   }
-  for (const tab of document.querySelectorAll("[data-tab]")) {
-    if (tab.getAttribute("data-tab") === route) tab.setAttribute("aria-current", "page");
-    else tab.removeAttribute("aria-current");
+  let activeTab = null;
+  for (const tab of tabs) {
+    if (tab.getAttribute("data-tab") === route) {
+      tab.setAttribute("aria-current", "page");
+      activeTab = tab;
+    } else {
+      tab.removeAttribute("aria-current");
+    }
   }
+  updateTabIndicator(activeTab, !firstRender && activeTab === clickedTab);
+  clickedTab = null;
   if (!firstRender) document.getElementById(`title-${route}`)?.focus();
   firstRender = false;
   // 홈이 넘긴 질문은 URL에 넣지 않고 메모리로만 받는다. 같은 질문 객체는 chat이 한 번만 실행한다.
   if (route === "aio" && state) chat.ask(state);
   else if (route === "aio") chat.refresh();
   // 아이오에서 바꾼 모드를 홈 표시에도 반영한다.
-  if (route === "home") syncHomeMode({ home, root: homeRoot, storage: prefs });
+  if (route === "home") syncHomeMode({ home, storage: prefs });
   if (route === "graduation") {
     demoLogin.refresh();
     if (state?.section === "recommendations") {

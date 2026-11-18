@@ -2,6 +2,7 @@
 // 서버가 보낸 글자는 textContent로만 넣는다. 전송·기록 형식은 chat-client·chat-history 계약을 따른다.
 import { FAQ, MODES, MODE_LABELS, MODE_STORAGE_KEY, readMode, saveMode, normalizeQuestion } from "./home.mjs";
 import { createQuickActions } from "./quick-actions.mjs";
+import { createSelectionIndicator } from "./selection-indicator.mjs";
 
 export const LANGS = Object.freeze(["ko", "en", "zh"]);
 export const DEFAULT_LANG = "ko";
@@ -99,14 +100,13 @@ export function createPrefStorage(storage, keys = PREF_KEYS) {
 }
 
 /**
- * 홈 화면이 처음 읽은 모드를 저장된 최신 모드로 맞춘다. home.mjs에는 갱신 함수가 없어서
- * 홈의 모드 버튼을 눌러 홈 자신의 처리기로 다시 그리게 한다. 맞췄으면 true.
+ * 홈을 열 때 저장된 모드와 표시 위치를 맞춘다. 모드가 바뀌었으면 true.
  */
-export function syncHomeMode({ home, root, storage }) {
-  const want = storedMode(storage);
-  if (!home || !want || home.mode === want) return false;
-  root?.querySelector?.(`[data-mode="${want}"]`)?.click?.();
-  return home.mode === want;
+export function syncHomeMode({ home, storage }) {
+  if (!home) return false;
+  const previousMode = home.mode;
+  home.refreshMode?.(storedMode(storage));
+  return home.mode !== previousMode;
 }
 
 /** https: 주소만 돌려준다. 그 밖에는 null. 전송 모듈이 거르더라도 화면에서 한 번 더 막는다. */
@@ -212,6 +212,7 @@ export function mountChat({ root, doc, storage, send, history, handwriting, quic
     lang = langSelect.value;
     saveLang(storage, lang);
     updateQuickActionsName();
+    updateModeIndicator();
   });
   langLabel.append(langSelect);
 
@@ -226,6 +227,7 @@ export function mountChat({ root, doc, storage, send, history, handwriting, quic
     return button;
   });
   modeGroup.append(...modeButtons);
+  const updateIndicator = createSelectionIndicator(modeGroup, modeButtons);
 
   const clearButton = el(doc, "button", {
     className: "button-secondary chat-clear",
@@ -379,17 +381,24 @@ export function mountChat({ root, doc, storage, send, history, handwriting, quic
     for (const button of modeButtons) {
       button.setAttribute("aria-pressed", button.getAttribute("data-mode") === mode ? "true" : "false");
     }
+    updateModeIndicator(persist);
+  }
+
+  function updateModeIndicator(animate = false) {
+    updateIndicator(modeButtons[MODES.indexOf(mode)], animate);
   }
 
   // 홈과 같은 저장 키를 쓴다. 마지막으로 본 저장값과 달라졌을 때만 다른 화면이 바꾼 것으로 보고 따른다.
   // 저장값이 그대로면(쓰기 실패 포함) 이 화면에서 고른 값을 지킨다. 저장소를 못 쓰면 fallback(홈이 넘긴 값)을 쓴다.
-  function syncMode(fallback) {
+  function syncMode(fallback, realign = false) {
     const stored = storedMode(storage);
     if (stored && stored !== seenStored) {
       setMode(stored, false);
       pickedHere = false;
     } else if (!stored && !pickedHere && MODES.includes(fallback)) {
       setMode(fallback, false); // 저장값이 전혀 없을 때만 홈이 넘긴 값을 쓰고, 여기서 고른 값은 지킨다
+    } else if (realign) {
+      updateModeIndicator();
     }
     return mode;
   }
@@ -795,24 +804,30 @@ export function mountChat({ root, doc, storage, send, history, handwriting, quic
     };
   }
 
-  setMode(mode, false);
   root.replaceChildren(toolbar, empty, log, status, chips, form);
+  setMode(mode, false);
   restore();
   paintEmpty();
 
   return {
     /** 홈이 넘긴 질문 객체를 실행한다. 같은 객체는 한 번만 실행한다. */
     ask(pending) {
-      if (!pending || typeof pending !== "object" || seen.has(pending)) return Promise.resolve(null);
+      if (!pending || typeof pending !== "object" || seen.has(pending)) {
+        updateModeIndicator();
+        return Promise.resolve(null);
+      }
       seen.add(pending);
       const question = normalizeQuestion(pending.question);
-      if (!question) return Promise.resolve(null);
+      if (!question) {
+        updateModeIndicator();
+        return Promise.resolve(null);
+      }
       // 홈은 화면을 연 뒤 바뀐 모드를 모를 수 있다. 저장된 값이 있으면 그것을 따른다.
-      return run(question, syncMode(pending.mode));
+      return run(question, syncMode(pending.mode, true));
     },
     /** 탭을 다시 열 때 다른 화면에서 바꾼 답변 모드를 반영한다. */
     refresh() {
-      syncMode();
+      syncMode(undefined, true);
     },
     closeQuickActions() {
       ring?.close(false);

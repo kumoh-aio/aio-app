@@ -1,5 +1,6 @@
 // 홈 화면. 문서 객체, 저장소, 캠퍼스 안내 로더, 이동 함수를 모두 주입받는다.
 // 화면에 넣는 글자는 textContent로만 넣는다.
+import { createSelectionIndicator } from "./selection-indicator.mjs";
 
 export const MODES = Object.freeze(["fast", "deep"]);
 export const DEFAULT_MODE = "fast";
@@ -156,24 +157,26 @@ export function mountHome({ root, doc, storage, loadCampusGuide, navigate }) {
     return button;
   });
   modeGroup.append(...modeButtons);
+  const updateIndicator = createSelectionIndicator(modeGroup, modeButtons);
 
   const submit = el(doc, "button", { className: "button-primary", text: TEXT.askSubmit, attrs: { type: "submit" } });
   const actions = el(doc, "div", { className: "ask-actions" });
   actions.append(modeGroup, submit);
   form.append(label, input, error, actions);
 
-  function paintMode() {
+  function paintMode(animate = false) {
     for (const button of modeButtons) {
       const active = button.getAttribute("data-mode") === mode;
       button.setAttribute("aria-pressed", active ? "true" : "false");
     }
+    updateIndicator(modeButtons[MODES.indexOf(mode)], animate);
   }
 
   function setMode(value) {
     if (!MODES.includes(value)) return;
     mode = value;
     saveMode(storage, value);
-    paintMode();
+    paintMode(true);
   }
 
   function showError(on) {
@@ -279,13 +282,17 @@ export function mountHome({ root, doc, storage, loadCampusGuide, navigate }) {
     retry.hidden = state !== "error";
   }
 
-  paintMode();
   root.replaceChildren(form, shortcutSection, faqSection, campusSection);
+  paintMode();
   const ready = loadCampus();
 
   return {
     ready,
     reload: loadCampus,
+    refreshMode(value) {
+      if (MODES.includes(value)) mode = value;
+      paintMode();
+    },
     get mode() {
       return mode;
     },

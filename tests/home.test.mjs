@@ -26,6 +26,8 @@ class FakeElement {
     this.children = [];
     this.attributes = new Map();
     this.listeners = new Map();
+    this.style = new Map();
+    this.style.setProperty = (name, value) => this.style.set(name, value);
     this.className = "";
     this.hidden = false;
     this.value = "";
@@ -57,6 +59,7 @@ class FakeElement {
     for (const node of nodes) {
       assert.ok(node instanceof FakeElement, "요소만 붙인다");
       this.children.push(node);
+      node.parentElement = this;
     }
   }
   replaceChildren(...nodes) {
@@ -83,6 +86,11 @@ class FakeElement {
   focus() {
     this.ownerDocument.activeElement = this;
   }
+  getBoundingClientRect() {
+    if (this.className === "mode-group") return { left: 10, right: 140, width: 130 };
+    if (this.getAttribute("data-mode") === "fast") return { left: 12, right: 64, width: 52 };
+    return { left: 68.25, right: 138, width: 69.75 };
+  }
   *walk() {
     yield this;
     for (const child of this.children) yield* child.walk();
@@ -97,7 +105,13 @@ class FakeElement {
 }
 
 function fakeDocument() {
-  const doc = { activeElement: null };
+  const doc = {
+    activeElement: null,
+    defaultView: {
+      addEventListener() {},
+      getComputedStyle: () => ({ borderLeftWidth: "1px", borderRightWidth: "1px" }),
+    },
+  };
   doc.createElement = (tag) => new FakeElement(doc, tag);
   return doc;
 }
@@ -287,6 +301,27 @@ test("저장된 모드로 시작한다", async () => {
   await home.ready;
   assert.equal(home.mode, "deep");
   assert.equal(q.mode("deep").getAttribute("aria-pressed"), "true");
+});
+
+test("홈에서 답변 모드를 연속 선택하면 마지막 좌표와 선택 상태가 남는다", async () => {
+  const { q, home } = mount();
+  await home.ready;
+  const fast = q.mode("fast");
+  const deep = q.mode("deep");
+  const group = fast.parentElement;
+  assert.equal(group.style.get("--indicator-left"), "1px");
+  for (const button of [deep, fast, deep]) button.dispatch("click");
+  assert.equal(group.getAttribute("data-indicator"), "ready");
+  assert.equal(group.getAttribute("data-indicator-dir"), "forward");
+  assert.equal(group.style.get("--indicator-left"), "57.25px");
+  assert.equal(group.style.get("--indicator-right"), "1px");
+  assert.equal(fast.getAttribute("aria-pressed"), "false");
+  assert.equal(deep.getAttribute("aria-pressed"), "true");
+
+  deep.dispatch("click");
+  assert.equal(group.getAttribute("data-indicator-dir"), "forward");
+  assert.equal(group.style.get("--indicator-left"), "57.25px");
+  assert.equal(group.style.get("--indicator-right"), "1px");
 });
 
 test("바로가기는 탭으로 가거나 질문 초안을 넘긴다", async () => {
