@@ -1,6 +1,7 @@
 // 아이오 채팅 화면. 문서 객체, 저장소, 전송 함수, 기록 저장소를 모두 주입받는다.
 // 서버가 보낸 글자는 textContent로만 넣는다. 전송·기록 형식은 chat-client·chat-history 계약을 따른다.
 import { FAQ, MODES, MODE_LABELS, MODE_STORAGE_KEY, readMode, saveMode, normalizeQuestion } from "./home.mjs";
+import { createQuickActions } from "./quick-actions.mjs";
 
 export const LANGS = Object.freeze(["ko", "en", "zh"]);
 export const DEFAULT_LANG = "ko";
@@ -175,11 +176,12 @@ function el(doc, tag, { className, text, attrs } = {}) {
  *                             signal: AbortSignal, onUpdate: (state: object) => void }) => Promise<object>,
  *           history: { load(): { sessionId: string|null, turns: { selectedVersion: number, versions: object[] }[] },
  *                      save(state: object): boolean, clear(): void },
- *           handwriting?: { open(options: { trigger: any, lang: string, onInsert: (text: string) => void }): void } }} options
+ *           handwriting?: { open(options: { trigger: any, lang: string, onInsert: (text: string) => void }): void },
+ *           quickActions?: { id: string, label: object, run?: Function }[] }} options
  *   handwriting(선택): 손글씨 패드. 없으면 펜 버튼을 그리지 않는다.
- * @returns {{ ask(pending: { question: string, mode?: string }): Promise<object|null>, readonly busy: boolean }}
+ * @returns {{ ask(pending: { question: string, mode?: string }): Promise<object|null>, closeQuickActions(): void, readonly busy: boolean }}
  */
-export function mountChat({ root, doc, storage, send, history, handwriting }) {
+export function mountChat({ root, doc, storage, send, history, handwriting, quickActions }) {
   if (!root || !doc || typeof send !== "function" || !history) {
     throw new TypeError("mountChat needs root, doc, send and history");
   }
@@ -209,6 +211,7 @@ export function mountChat({ root, doc, storage, send, history, handwriting }) {
     }
     lang = langSelect.value;
     saveLang(storage, lang);
+    updateQuickActionsName();
   });
   langLabel.append(langSelect);
 
@@ -270,7 +273,45 @@ export function mountChat({ root, doc, storage, send, history, handwriting }) {
   // 더하지 않는다(iPad Scribble 같은 기기 손글씨 입력이 그대로 동작해야 한다).
   const pen = typeof handwriting?.open === "function" ? createPenButton() : null;
   formRow.append(...(pen ? [input, pen, submit] : [input, submit]));
+  let ring = null;
+  let quickButton = null;
+  if (Array.isArray(quickActions)) {
+    const actions = quickActions.filter((action) => action.id !== "handwriting" || pen)
+      .map((action) => action.id === "handwriting"
+        ? { ...action, run: ({ trigger }) => openHandwriting(trigger) }
+        : action);
+    ring = createQuickActions({ doc, actions });
+    quickButton = el(doc, "button", {
+      className: "chat-plus",
+      text: "+",
+      attrs: { type: "button", "data-chat-quick-actions": "", "aria-haspopup": "menu",
+        "aria-expanded": "false", "aria-controls": ring.element.id },
+    });
+    updateQuickActionsName();
+    quickButton.addEventListener("click", () => ring.toggle(quickButton, { lang }));
+    quickButton.addEventListener("keydown", (event) => {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        ring.open(quickButton, { lang });
+      }
+    });
+    formRow.replaceChildren(quickButton, input, ...(pen ? [pen] : []), submit);
+  }
   form.append(inputLabel, formRow, inputError);
+  if (ring) form.append(ring.element);
+
+  function updateQuickActionsName() {
+    quickButton?.setAttribute("aria-label", {
+      ko: "빠른 실행", en: "Quick actions", zh: "快捷操作",
+    }[lang]);
+  }
+
+  function openHandwriting(trigger) {
+    const length = input.value.length;
+    const end = clampIndex(input.selectionEnd, length, length);
+    const start = Math.min(clampIndex(input.selectionStart, length, end), end);
+    handwriting.open({ trigger, lang, onInsert: (text) => insertText(text, start, end) });
+  }
 
   function createPenButton() {
     const button = el(doc, "button", {
@@ -278,13 +319,7 @@ export function mountChat({ root, doc, storage, send, history, handwriting }) {
       attrs: { type: "button", "aria-label": TEXT.pen, "aria-haspopup": "dialog", "data-chat-pen": "" },
     });
     button.append(el(doc, "span", { className: "chat-pen-icon", text: "✎", attrs: { "aria-hidden": "true" } }));
-    button.addEventListener("click", () => {
-      // 패드는 모달이라 열려 있는 동안 입력창이 바뀌지 않는다. 누른 순간의 선택 범위에 넣는다.
-      const length = input.value.length;
-      const end = clampIndex(input.selectionEnd, length, length);
-      const start = Math.min(clampIndex(input.selectionStart, length, end), end);
-      handwriting.open({ trigger: button, lang, onInsert: (text) => insertText(text, start, end) });
-    });
+    button.addEventListener("click", () => openHandwriting(button));
     return button;
   }
 
@@ -778,6 +813,9 @@ export function mountChat({ root, doc, storage, send, history, handwriting }) {
     /** 탭을 다시 열 때 다른 화면에서 바꾼 답변 모드를 반영한다. */
     refresh() {
       syncMode();
+    },
+    closeQuickActions() {
+      ring?.close(false);
     },
     get busy() {
       return active !== null;

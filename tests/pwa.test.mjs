@@ -15,6 +15,7 @@ const files = ["./", "index.html", "manifest.webmanifest", "assets/app.css", "as
   "assets/demo-login.mjs", "assets/graduation-view.mjs", "assets/calendar-view.mjs",
   "assets/calendar-grid.mjs", "assets/appearance.mjs",
   "assets/handwriting-pad.mjs", "assets/handwriting-geometry.mjs",
+  "assets/quick-actions.mjs",
   ...generatedIcons.keys()];
 const requireFullShell = process.env.AIO_REQUIRE_FULL_SHELL === "1";
 const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/home.mjs", "assets/router.mjs",
@@ -62,7 +63,7 @@ function worker(scope = "https://example.invalid/app/") {
       clients: { claim: async () => { calls.claimed += 1; } } },
     caches: { open: async (name) => { calls.opened.push(name); return cache; },
       keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4",
-        "aio-shell-v5", "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "unrelated"],
+        "aio-shell-v5", "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10", "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
     fetch: async (request) => { calls.fetched.push(request); return "network"; },
   });
@@ -123,17 +124,19 @@ test("precache files exist or are generated icons", async () => {
   }
 });
 
-test("activate removes v8 and older app caches and keeps CACHE_NAME v9", async () => {
+test("activate removes v0 through v9 app caches and preserves v10 and unrelated caches", async () => {
   const { events, calls } = worker();
   let pending;
   events.install({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.opened, ["aio-shell-v9"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v10"]);
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
   assert.deepEqual(calls.deleted,
     ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4", "aio-shell-v5",
-      "aio-shell-v6", "aio-shell-v7", "aio-shell-v8"]);
+      "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9"]);
+  assert.ok(!calls.deleted.includes("aio-shell-v10"));
+  assert.ok(!calls.deleted.includes("unrelated"));
   assert.equal(calls.claimed, 1);
 });
 
@@ -213,14 +216,19 @@ test("listed GET uses shell cache and falls back to network on miss", async () =
 
 // app.js의 import 줄을 걷어 내고 모듈 함수를 스텁으로 넣어 부팅한다. 네트워크와 저장소는 쓰지 않는다.
 function bootApp(startRoute, storage = null) {
-  const calls = { refresh: 0, calendarRefresh: 0, moves: [], students: 0, login: [], diagnosis: [], handwritingClose: 0 };
+  const calls = { refresh: 0, calendarRefresh: 0, moves: [], students: 0, login: [], diagnosis: [], handwritingClose: 0, quickActionsClose: 0 };
   const roots = new Map();
   const doc = {
     getElementById(id) {
-      if (!roots.has(id)) roots.set(id, { id, focus() {} });
+      if (!roots.has(id)) roots.set(id, {
+        id, attributes: new Map(),
+        setAttribute(name, value) { this.attributes.set(name, value); },
+        focus() { calls.focused = this; },
+      });
       return roots.get(id);
     },
     querySelectorAll: () => [],
+    querySelector: () => null,
   };
   const options = {};
   const diagnosis = { show() {}, clear() {} };
@@ -243,7 +251,10 @@ function bootApp(startRoute, storage = null) {
       options.handwriting = opts;
       return { open() {}, close() { calls.handwritingClose += 1; } };
     },
-    mountChat: () => ({ refresh() {} }),
+    mountChat(opts) {
+      options.chat = opts;
+      return { refresh() {}, closeQuickActions() { calls.quickActionsClose += 1; } };
+    },
     mountHome: () => ({}),
     mountAppearance(opts) {
       assert.equal(options.appearance, undefined, "mountAppearance runs only at boot");
@@ -277,6 +288,27 @@ function bootApp(startRoute, storage = null) {
   return { calls, roots, options, diagnosis, doc };
 }
 
+test("quick actions navigate existing tabs and focus BISKIT after the route becomes visible", () => {
+  const { calls, options, doc } = bootApp("aio");
+  const actions = options.chat.quickActions;
+  actions.find((action) => action.id === "calendar").run();
+  actions.find((action) => action.id === "graduation").run();
+  actions.find((action) => action.id === "biskit").run();
+  assert.deepEqual(calls.moves.map((move) => move.route), ["calendar", "graduation", "graduation"]);
+  assert.equal(calls.moves[2].state.section, "recommendations");
+  options.onRoute(calls.moves[2]);
+  assert.equal(calls.focused.id, "title-graduation");
+  assert.equal(calls.focused.attributes.get("tabindex"), "-1");
+  const recommendation = { focus() { calls.focused = this; }, setAttribute(name, value) { this[name] = value; } };
+  doc.querySelector = (selector) => {
+    assert.equal(selector, '[data-grad-section="recommendations"] h2');
+    return recommendation;
+  };
+  options.onRoute(calls.moves[2]);
+  assert.equal(calls.focused, recommendation);
+  assert.equal(recommendation.tabindex, "-1");
+});
+
 test("app restores appearance before the initial route even when storage access throws", () => {
   const storage = {};
   const available = bootApp("home", storage);
@@ -295,6 +327,13 @@ test("leaving the AIO tab closes the handwriting pad", () => {
   assert.equal(calls.handwritingClose, 0);
   options.onRoute({ route: "home" });
   assert.equal(calls.handwritingClose, 1);
+});
+
+test("leaving the AIO tab closes quick actions", () => {
+  const { calls, options } = bootApp("aio");
+  assert.equal(calls.quickActionsClose, 0);
+  options.onRoute({ route: "calendar" });
+  assert.equal(calls.quickActionsClose, 1);
 });
 
 test("calendar tab mounts the calendar module once and refreshes on each entry", () => {
