@@ -8,6 +8,8 @@ import {
   normalizeDiagnosis,
   ringPercent,
   safeLink,
+  biskitScore,
+  recommendTitle,
   mountGraduationDiagnosis,
 } from "../web/assets/graduation-view.mjs";
 
@@ -390,8 +392,10 @@ test("가상 d02: 항목·세부 행·부족 요건·근거·BISKIT 추천을 �
   assert.deepEqual(q.titles("data-grad-recommend"), ["가상 프로그램 나", "가상 프로그램 가"]);
   assert.deepEqual(q.all("data-grad-facts").map((n) => n.textContent), [
     "신청 마감 2000-01-05 · 마일리지 10점 · BISKIT 로그인 필요",
-    "신청 마감 2000-01-06 · 마감 시각 확인 필요 · 행사일 2000-01-07 · 마일리지 미공개 · 재학 상태 확인 필요",
+    "신청 마감 2000-01-06 · 마감 시각 확인 필요 · 행사일 2000-01-07 · 재학 상태 확인 필요",
   ]);
+  // d02 mileage 행은 숫자 10/30이라 '정수+점' 형식이 아니다 → 기본 제목
+  assert.equal(q.section("recommendations").children[0].textContent, TEXT.recommendTitle);
 
   // 링크: https만 a, 나머지는 글자. 새 창 noopener
   assert.deepEqual(q.links().map((a) => [a.getAttribute("data-grad-link"), a.getAttribute("href")]), [
@@ -435,6 +439,111 @@ test("가상 d04: 분모 0과 숫자 문자열, 추천 후보가 없으면 안�
   assert.equal(rec.find((n) => n.hasAttribute("data-grad-rec-meta")).textContent, "부족 마일리지 120점 · 목록 확인일 2000-01-02");
   assert.equal(rec.find((n) => n.hasAttribute("data-grad-no-programs")).textContent, TEXT.noPrograms);
   assert.equal(q.all("data-grad-recommend").length, 0);
+});
+
+// ---- BISKIT 내 점수 제목과 마일리지 줄 ----
+
+// 가상 응답: extracurricular 아래 mileage 행과 추천 부족량만 바꿔 끼운다.
+function biskitData({ mileage = [{ current: "480점", required: "500점" }], shortfallPoints = 20, programs = [] } = {}) {
+  return {
+    items: [
+      creditsItem("met", { status: "met", current: 80, required: 77 }),
+      row("extracurricular", "가상 비교과", "short", null, null, {
+        details: [
+          row("career_education", "가상 진로교육", "met", 1, 1),
+          ...mileage.map((m) => row("mileage", "가상 마일리지", "short", m.current, m.required)),
+        ],
+      }),
+    ],
+    biskit_recommendations: { shortfall_points: shortfallPoints, listed_on: "2000-01-02", portal_url: null, programs },
+  };
+}
+
+async function recTitle(data) {
+  const { view, q } = mount({ loadDiagnosis: async () => data });
+  assert.equal(await view.show("virtual-x"), "ready");
+  return q.section("recommendations").children[0].textContent;
+}
+
+test("BISKIT 제목: '정수+점' 값의 차이가 shortfall_points와 같으면 내 점수를 쓴다", async () => {
+  assert.equal(await recTitle(biskitData()), "내 BISKIT 480/500점 · 20점 부족");
+  const d = normalizeDiagnosis(biskitData());
+  assert.deepEqual(d.recommendations.score, { current: 480, required: 500, shortfall: 20 });
+  assert.equal(recommendTitle(d.recommendations.score), "내 BISKIT 480/500점 · 20점 부족");
+});
+
+test("BISKIT 제목: 조건이 하나라도 어긋나면 기본 제목", async () => {
+  const cases = {
+    "숫자만 있는 값": biskitData({ mileage: [{ current: 480, required: 500 }] }),
+    "숫자 문자열": biskitData({ mileage: [{ current: "480", required: "500" }] }),
+    "current 누락": biskitData({ mileage: [{ current: null, required: "500점" }] }),
+    "required 누락": biskitData({ mileage: [{ current: "480점", required: undefined }] }),
+    "mileage 행 없음": biskitData({ mileage: [] }),
+    "shortfall_points 누락": biskitData({ shortfallPoints: null }),
+    "shortfall_points 문자열": biskitData({ shortfallPoints: "20" }),
+    "소수": biskitData({ mileage: [{ current: "480.5점", required: "500점" }] }),
+    "음수": biskitData({ mileage: [{ current: "-480점", required: "500점" }] }),
+    "앞뒤 공백": biskitData({ mileage: [{ current: " 480점", required: "500점 " }] }),
+    "단위 다름": biskitData({ mileage: [{ current: "480 점", required: "500pt" }] }),
+    "지수 표기": biskitData({ mileage: [{ current: "4.8e2점", required: "500점" }] }),
+    "안전 정수 초과": biskitData({ mileage: [{ current: "9007199254740993점", required: "9007199254740999점" }], shortfallPoints: 6 }),
+    "차이 불일치": biskitData({ shortfallPoints: 30 }),
+    "차이 0": biskitData({ mileage: [{ current: "500점", required: "500점" }], shortfallPoints: 0 }),
+    "초과 달성": biskitData({ mileage: [{ current: "520점", required: "500점" }], shortfallPoints: -20 }),
+    "mileage 행 중복": biskitData({ mileage: [{ current: "480점", required: "500점" }, { current: "480점", required: "500점" }] }),
+  };
+  for (const [name, data] of Object.entries(cases)) {
+    assert.equal(await recTitle(data), TEXT.recommendTitle, name);
+  }
+});
+
+test("BISKIT 제목: extracurricular 밖의 mileage 행은 보지 않고, 원본 행만 검사해 기존 진단 표시는 그대로다", async () => {
+  const outside = biskitData({ mileage: [] });
+  outside.items.push(row("other", "가상 기타", "short", null, null, { details: [row("mileage", "가상 마일리지", "short", "480점", "500점")] }));
+  assert.equal(await recTitle(outside), TEXT.recommendTitle);
+
+  // '480점'은 num()이 받지 않으므로 세부 행 수치 줄과 막대는 예전처럼 그리지 않는다.
+  const { view, q } = mount({ loadDiagnosis: async () => biskitData() });
+  await view.show("virtual-x");
+  const mileage = q.details("extracurricular")[1];
+  assert.equal(q.part(mileage, "grad-item-credits"), null);
+  assert.equal(q.part(mileage, "grad-bar"), null);
+  assert.equal(q.section("recommendations").find((n) => n.hasAttribute("data-grad-rec-meta")).textContent, "부족 마일리지 20점 · 목록 확인일 2000-01-02");
+});
+
+test("프로그램 마일리지 줄: published 양의 정수만 그리고, 나머지는 줄 없이 마감일·행사일은 남긴다", async () => {
+  const program = (title, mileage_status, mileage_points) => ({
+    title, audience: null, eligibility: "eligible", apply_until: "2000-01-05", deadline_status: "open",
+    event_on: "2000-01-07", mileage_status, mileage_points, notice_url: null, application_url: null, login_required: true,
+  });
+  const programs = [
+    program("가상 공개", "published", 15),
+    program("가상 상태 a", "announced", 15),
+    program("가상 상태 u", "undisclosed", null),
+    program("가상 영점", "published", 0),
+    program("가상 음수", "published", -5),
+    program("가상 소수", "published", 1.5),
+    program("가상 문자열", "published", "15"),
+    program("가상 누락", "published", null),
+    program("가상 모름", "unknown", 15),
+    program("가상 공백 상태", " published ", 15),
+  ];
+  const { view, q, root } = mount({ loadDiagnosis: async () => biskitData({ programs }) });
+  await view.show("virtual-x");
+  const rest = "신청 마감 2000-01-05 · 행사일 2000-01-07 · BISKIT 로그인 필요";
+  assert.deepEqual(q.all("data-grad-facts").map((n) => n.textContent), [
+    "신청 마감 2000-01-05 · 행사일 2000-01-07 · 마일리지 15점 · BISKIT 로그인 필요",
+    ...programs.slice(1).map(() => rest),
+  ]);
+  assert.doesNotMatch(root.textContent, /미공개|지급 공지/, "공지·미공개 문구는 어디에도 그리지 않는다");
+  assert.equal(TEXT.mileageAnnounced, undefined);
+  assert.equal(TEXT.mileageUndisclosed, undefined);
+});
+
+test("biskitScore는 형식이 맞지 않는 입력에 null", () => {
+  assert.equal(biskitScore(null, 20), null);
+  assert.equal(biskitScore([null, { id: "extracurricular", details: null }], 20), null);
+  assert.deepEqual(biskitScore([{ id: "extracurricular", details: [{ id: "mileage", current: "0점", required: "30점" }] }], 30), { current: 0, required: 30, shortfall: 30 });
 });
 
 test("총학점 행이 없으면 형식 오류 대신 그래프만 빼고 요건을 그린다", async () => {

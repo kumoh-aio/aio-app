@@ -39,8 +39,6 @@ export const TEXT = Object.freeze({
   deadlineCheck: "마감 시각 확인 필요",
   loginRequired: "BISKIT 로그인 필요",
   mileagePoints: "마일리지",
-  mileageAnnounced: "마일리지 지급 공지",
-  mileageUndisclosed: "마일리지 미공개",
   portal: "BISKIT 열기 ↗",
   notice: "공지 보기 ↗",
   apply: "신청하기 ↗",
@@ -66,6 +64,35 @@ function num(value) {
     return { text: value.trim(), value: Number(value) };
   }
   return null;
+}
+
+// 양의 안전 정수인 JSON 숫자만 받는다. 0·음수·소수·문자열은 null.
+const positiveInt = (value) => (typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null);
+
+// "480점"처럼 정수 뒤에 '점'만 붙은 값을 안전 정수로 바꾼다. 숫자만 있거나 형식이 다르면 null.
+function pointsText(value) {
+  if (typeof value !== "string" || !/^\d+점$/.test(value)) return null;
+  const n = Number(value.slice(0, -1));
+  return Number.isSafeInteger(n) ? n : null;
+}
+
+/**
+ * BISKIT 추천 제목에 쓸 내 마일리지. num()을 거치지 않고 원본 응답만 검사한다.
+ * extracurricular 아래 mileage 행이 정확히 하나이고, current·required가 "정수+점"이며
+ * required - current가 양수이면서 shortfall_points와 같을 때만 값을 돌려준다.
+ */
+export function biskitScore(items, shortfallPoints) {
+  if (!Array.isArray(items)) return null;
+  const rows = items
+    .filter((item) => isObj(item) && item.id === "extracurricular" && Array.isArray(item.details))
+    .flatMap((item) => item.details.filter((r) => isObj(r) && r.id === "mileage"));
+  if (rows.length !== 1) return null;
+  const current = pointsText(rows[0].current);
+  const required = pointsText(rows[0].required);
+  if (current == null || required == null) return null;
+  const shortfall = required - current;
+  if (shortfall <= 0 || !Number.isSafeInteger(shortfallPoints) || shortfall !== shortfallPoints) return null;
+  return { current, required, shortfall };
 }
 
 /** https 주소만 정규화해 돌려준다. 그 밖에는 null. */
@@ -118,7 +145,7 @@ function programOf(raw) {
     deadlineStatus: str(raw.deadline_status),
     eventOn: str(raw.event_on),
     mileageStatus: str(raw.mileage_status),
-    mileagePoints: num(raw.mileage_points),
+    mileagePoints: raw.mileage_status === "published" ? positiveInt(raw.mileage_points) : null,
     loginRequired: raw.login_required === true,
     notice: link(raw.notice_url),
     application: link(raw.application_url),
@@ -171,6 +198,7 @@ export function normalizeDiagnosis(data) {
   const recommendations = isObj(rec)
     ? {
       shortfallPoints: num(rec.shortfall_points),
+      score: biskitScore(data.items, rec.shortfall_points),
       listedOn: str(rec.listed_on),
       portal: link(rec.portal_url),
       programs: Array.isArray(rec.programs) ? rec.programs.map(programOf).filter(Boolean) : [],
@@ -188,7 +216,13 @@ export function ringPercent(earned, required) {
   return Math.min(100, Math.max(0, (e / r) * 100));
 }
 
-const pct2 = (earned, required) => Number(ringPercent(earned, required).toFixed(2));
+/** 추천 구역 제목. 내 점수를 검증했으면 "내 BISKIT 480/500점 · 20점 부족", 아니면 기본 제목. */
+export function recommendTitle(score) {
+  if (!score) return TEXT.recommendTitle;
+  return `내 BISKIT ${score.current}/${score.required}점 · ${score.shortfall}점 부족`;
+}
+
+const pct2 =(earned, required) => Number(ringPercent(earned, required).toFixed(2));
 
 function el(doc, tag, { className, text, attrs } = {}) {
   const node = doc.createElement(tag);
@@ -388,7 +422,7 @@ export function mountGraduationDiagnosis({ root, doc, loadDiagnosis, onAsk }) {
     // BISKIT 추천: 서버가 null이면(마일리지 충족·부족량 모름) 구역을 그리지 않는다.
     if (d.recommendations) {
       const r = d.recommendations;
-      const box = section(TEXT.recommendTitle, "recommendations");
+      const box = section(recommendTitle(r.score), "recommendations");
       const meta = [
         r.shortfallPoints ? `${TEXT.shortfallPoints} ${r.shortfallPoints.text}점` : "",
         r.listedOn ? `${TEXT.listedOn} ${r.listedOn}` : "",
@@ -407,9 +441,8 @@ export function mountGraduationDiagnosis({ root, doc, loadDiagnosis, onAsk }) {
             p.applyUntil ? `${TEXT.applyUntil} ${p.applyUntil}` : "",
             p.deadlineStatus === "needs_check" ? TEXT.deadlineCheck : "",
             p.eventOn ? `${TEXT.eventOn} ${p.eventOn}` : "",
-            p.mileageStatus === "published" && p.mileagePoints ? `${TEXT.mileagePoints} ${p.mileagePoints.text}점`
-              : p.mileageStatus === "announced" ? TEXT.mileageAnnounced
-                : p.mileageStatus === "undisclosed" ? TEXT.mileageUndisclosed : "",
+            // published이고 양의 정수일 때만. 공지·미공개·잘못된 값은 줄을 만들지 않는다.
+            p.mileagePoints ? `${TEXT.mileagePoints} ${p.mileagePoints}점` : "",
             p.eligibility === "needs_check" ? TEXT.eligibilityCheck : "",
             p.loginRequired ? TEXT.loginRequired : "",
           ].filter(Boolean);
