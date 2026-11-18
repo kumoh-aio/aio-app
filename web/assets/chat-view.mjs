@@ -17,6 +17,7 @@ export const TEXT = Object.freeze({
   inputLabel: "아이오에게 질문",
   inputPlaceholder: "예: 휴학 신청은 어디서 하나요?",
   submit: "보내기",
+  pen: "손글씨로 입력",
   inputEmpty: "질문을 입력해 주세요.",
   chipsTitle: "추천 질문",
   streaming: "아이오가 답을 쓰고 있어요.",
@@ -173,10 +174,12 @@ function el(doc, tag, { className, text, attrs } = {}) {
  *           send: (request: { message: string, mode: string, lang: string, sessionId: string|null,
  *                             signal: AbortSignal, onUpdate: (state: object) => void }) => Promise<object>,
  *           history: { load(): { sessionId: string|null, turns: { selectedVersion: number, versions: object[] }[] },
- *                      save(state: object): boolean, clear(): void } }} options
+ *                      save(state: object): boolean, clear(): void },
+ *           handwriting?: { open(options: { trigger: any, lang: string, onInsert: (text: string) => void }): void } }} options
+ *   handwriting(선택): 손글씨 패드. 없으면 펜 버튼을 그리지 않는다.
  * @returns {{ ask(pending: { question: string, mode?: string }): Promise<object|null>, readonly busy: boolean }}
  */
-export function mountChat({ root, doc, storage, send, history }) {
+export function mountChat({ root, doc, storage, send, history, handwriting }) {
   if (!root || !doc || typeof send !== "function" || !history) {
     throw new TypeError("mountChat needs root, doc, send and history");
   }
@@ -263,8 +266,48 @@ export function mountChat({ root, doc, storage, send, history }) {
   inputError.hidden = true;
   const submit = el(doc, "button", { className: "button-primary", text: TEXT.submit, attrs: { type: "submit", "data-chat-submit": "" } });
   const formRow = el(doc, "div", { className: "chat-form-row" });
-  formRow.append(input, submit);
+  // 손글씨 펜 버튼은 입력창과 보내기 사이에 둔다. textarea에는 덮개·포인터 처리기·터치 동작 CSS를
+  // 더하지 않는다(iPad Scribble 같은 기기 손글씨 입력이 그대로 동작해야 한다).
+  const pen = typeof handwriting?.open === "function" ? createPenButton() : null;
+  formRow.append(...(pen ? [input, pen, submit] : [input, submit]));
   form.append(inputLabel, formRow, inputError);
+
+  function createPenButton() {
+    const button = el(doc, "button", {
+      className: "chat-pen",
+      attrs: { type: "button", "aria-label": TEXT.pen, "aria-haspopup": "dialog", "data-chat-pen": "" },
+    });
+    button.append(el(doc, "span", { className: "chat-pen-icon", text: "✎", attrs: { "aria-hidden": "true" } }));
+    button.addEventListener("click", () => {
+      // 패드는 모달이라 열려 있는 동안 입력창이 바뀌지 않는다. 누른 순간의 선택 범위에 넣는다.
+      const length = input.value.length;
+      const end = clampIndex(input.selectionEnd, length, length);
+      const start = Math.min(clampIndex(input.selectionStart, length, end), end);
+      handwriting.open({ trigger: button, lang, onInsert: (text) => insertText(text, start, end) });
+    });
+    return button;
+  }
+
+  function clampIndex(value, length, fallback) {
+    return Number.isInteger(value) ? Math.max(0, Math.min(value, length)) : fallback;
+  }
+
+  // 받은 글자를 선택 범위에 넣고 커서를 그 뒤에 둔다. 전송하지 않는다.
+  function insertText(text, start, end) {
+    if (typeof text !== "string" || !text) return;
+    const length = input.value.length;
+    const to = Math.min(end, length);
+    const from = Math.min(start, to);
+    if (typeof input.setRangeText === "function") {
+      input.setRangeText(text, from, to, "end");
+    } else {
+      input.value = input.value.slice(0, from) + text + input.value.slice(to);
+    }
+    // 오류 표시는 input 처리기가 갱신한다.
+    const EventCtor = doc.defaultView?.Event ?? globalThis.Event;
+    input.dispatchEvent?.(new EventCtor("input", { bubbles: true }));
+    input.focus();
+  }
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     if (active) return;

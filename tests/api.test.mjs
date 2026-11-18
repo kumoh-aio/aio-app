@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApi, requestJson } from "../web/assets/api.mjs";
+import { createApi, requestJson, HANDWRITING_MAX_BYTES } from "../web/assets/api.mjs";
 import { API_BASE } from "../web/assets/config.mjs";
 
 test("health uses the fixed API and omits credentials and caches", async () => {
@@ -124,6 +124,134 @@ test("JSON body is serialized with content type and preserves HTTP status", asyn
       return new Response(null, { status: 401 });
     },
   }), { status: 401 });
+});
+
+// ---- 손글씨 인식 ----
+
+const PNG_HEAD = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+// 서명만 맞춘 가상 PNG. size를 주면 그 길이로 채운다.
+const png = (size = 16, type = "image/png") => {
+  const bytes = new Uint8Array(size);
+  bytes.set(PNG_HEAD.slice(0, size));
+  return new Blob([bytes], { type });
+};
+
+function handwritingApi(respond) {
+  const calls = [];
+  const api = createApi({ base: "https://example.invalid/", fetchImpl: async (url, options) => {
+    calls.push({ url, options });
+    return respond(url, options);
+  } });
+  return { api, calls };
+}
+
+test("handwriting sends multipart image and lang without content type or credentials", async () => {
+  const { api, calls } = handwritingApi(() => Response.json({ text: "  가상 손글씨  " }));
+  const image = png();
+  assert.equal(await api.handwriting({ image, lang: "en" }), "가상 손글씨");
+  assert.equal(calls.length, 1);
+  const { url, options } = calls[0];
+  assert.equal(url, "https://example.invalid/api/v1/handwriting");
+  assert.equal(options.method, "POST");
+  assert.equal(options.credentials, "omit");
+  assert.equal(options.cache, "no-store");
+  assert.equal(options.headers, undefined, "multipart 경계는 브라우저가 붙인다");
+  assert.ok(options.signal instanceof AbortSignal);
+  assert.ok(options.body instanceof FormData);
+  assert.deepEqual([...options.body.keys()], ["image", "lang"]);
+  const file = options.body.get("image");
+  assert.equal(file.name, "handwriting.png");
+  assert.equal(file.type, "image/png");
+  assert.equal(file.size, image.size);
+  assert.equal(options.body.get("lang"), "en");
+});
+
+test("handwriting sends lang only for ko, en and zh", async () => {
+  for (const [lang, expected] of [["ko", "ko"], ["zh", "zh"], ["fr", null], [undefined, null], ["KO", null]]) {
+    const { api, calls } = handwritingApi(() => Response.json({ text: "가상" }));
+    await api.handwriting({ image: png(), lang });
+    assert.equal(calls[0].options.body.get("lang"), expected, String(lang));
+  }
+});
+
+for (const body of [{}, { text: "" }, { text: "  \n " }, { text: 3 }, null]) {
+  test(`handwriting 200 without readable text rejects as 422: ${JSON.stringify(body)}`, async () => {
+    const { api } = handwritingApi(() => Response.json(body));
+    await assert.rejects(api.handwriting({ image: png() }), { status: 422 });
+  });
+}
+
+test("handwriting 200 with invalid JSON rejects as 422", async () => {
+  const { api } = handwritingApi(() => new Response("not json", { status: 200 }));
+  await assert.rejects(api.handwriting({ image: png() }), { status: 422 });
+});
+
+for (const status of [400, 413, 415, 422, 429, 500, 503]) {
+  test(`handwriting HTTP ${status} keeps status, ignores server text and is not retried`, async () => {
+    const { api, calls } = handwritingApi(() => Response.json({ detail: "가상 서버 문구" }, { status }));
+    await assert.rejects(api.handwriting({ image: png() }), (error) => {
+      assert.equal(error.status, status);
+      assert.doesNotMatch(error.message, /가상 서버 문구/);
+      return true;
+    });
+    assert.equal(calls.length, 1);
+  });
+}
+
+test("handwriting network failure is not retried", async () => {
+  const { api, calls } = handwritingApi(() => {
+    throw new TypeError("fictional offline");
+  });
+  await assert.rejects(api.handwriting({ image: png() }), TypeError);
+  assert.equal(calls.length, 1);
+});
+
+test("handwriting rejects non-PNG and oversized images before fetch", async () => {
+  const { api, calls } = handwritingApi(() => assert.fail("요청하면 안 된다"));
+  for (const image of [undefined, null, "data:image/png;base64,", { type: "image/png", size: 10 },
+    png(16, "image/jpeg"), png(16, ""), new Blob([new Uint8Array(16)], { type: "image/png" }), png(4)]) {
+    await assert.rejects(api.handwriting({ image }), { status: 415 });
+  }
+  await assert.rejects(api.handwriting({ image: png(HANDWRITING_MAX_BYTES + 1) }), { status: 413 });
+  assert.equal(calls.length, 0);
+  assert.equal(HANDWRITING_MAX_BYTES, 2000000);
+});
+
+test("handwriting accepts an image of exactly 2,000,000 bytes", async () => {
+  const { api, calls } = handwritingApi(() => Response.json({ text: "가상" }));
+  assert.equal(await api.handwriting({ image: png(HANDWRITING_MAX_BYTES) }), "가상");
+  assert.equal(calls[0].options.body.get("image").size, HANDWRITING_MAX_BYTES);
+});
+
+const hang = (_url, { signal }) => new Promise((_resolve, reject) => {
+  signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+});
+
+test("handwriting stops when the caller aborts and skips fetch if already aborted", async () => {
+  let started;
+  const fetchStarted = new Promise((resolve) => {
+    started = resolve;
+  });
+  const { api, calls } = handwritingApi((url, options) => {
+    started();
+    return hang(url, options);
+  });
+  const controller = new AbortController();
+  const pending = api.handwriting({ image: png(), signal: controller.signal });
+  await fetchStarted;
+  assert.equal(calls.length, 1);
+  controller.abort();
+  await assert.rejects(pending, { name: "AbortError" });
+
+  const done = new AbortController();
+  done.abort();
+  await assert.rejects(api.handwriting({ image: png(), signal: done.signal }), { name: "AbortError" });
+  assert.equal(calls.length, 1);
+});
+
+test("handwriting has its own time limit", async () => {
+  const api = createApi({ base: "https://example.invalid", fetchImpl: hang, handwritingTimeoutMs: 5 });
+  await assert.rejects(api.handwriting({ image: png() }), { name: "TimeoutError" });
 });
 
 test("demo API encodes student ID and blocks arbitrary login input", async () => {

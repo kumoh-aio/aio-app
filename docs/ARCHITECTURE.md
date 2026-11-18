@@ -32,6 +32,20 @@ aio-app/
 | 학사일정 | `GET /academic-calendar/{year}/{term}` |
 | 캠퍼스 안내 | `GET /campus-guide` |
 | 사진 속 안내문 | `POST /photo-question`, `POST /poster-lookup` |
+| 손글씨 인식 | `POST /handwriting` — multipart `image`(PNG, 2,000,000바이트 이하), 선택 `lang`(ko·en·zh). 성공 200 `{"text": "..."}` |
+
+## 손글씨 입력 계약
+
+| 층 | 계약 |
+| --- | --- |
+| API | `createApi().handwriting({ image, lang, signal })` → `Promise<string>`. `FormData`에 `image`(파일 이름 `handwriting.png`)와 `lang`(ko·en·zh일 때만)을 담고 `Content-Type`은 지정하지 않는다. `credentials: "omit"`, `cache: "no-store"`, 자동 재시도 없음, 제한 시간 90초와 호출자 `signal`을 함께 따른다 |
+| 사전 거부 | PNG가 아니면(MIME 형식이나 서명 8바이트가 다르면) 415, 2,000,000바이트를 넘으면 413 오류로 요청 없이 거부한다 |
+| 실패 | HTTP 오류는 `error.status`에 상태 코드만 담고 서버 본문 문구는 쓰지 않는다. 200인데 문자열 `text`가 없거나 공백뿐이면 422로 다룬다. 중단은 `AbortError`, 제한 시간은 `TimeoutError`, 네트워크 오류는 `TypeError`이며 `status`가 없다 |
+| 화면 문구 | 400·413·415 크기·형식, 422 읽을 글씨 없음, 503 사용 불가, 나머지는 일반 오류 |
+| 패드 | `createHandwritingPad({ doc, recognize })` → `open({ trigger, lang, onInsert })`, `close()`. `recognize({ image, lang, signal })`는 위 API를 감싼다 |
+| 채팅 | `mountChat({ ..., handwriting })`. 패드가 있으면 입력창과 보내기 사이에 펜 버튼(`chat-pen`, 이름 `손글씨로 입력`, `aria-haspopup="dialog"`)을 그리고, 없으면 그리지 않는다. 누른 순간의 선택 범위를 기억해 `onInsert(text)`에서 `setRangeText(text, start, end, "end")`로 넣고 `input` 이벤트를 보낸 뒤 입력창에 포커스를 둔다. 전송은 하지 않는다 |
+| 입력창 | `textarea`에 덮개·포인터 처리기·`touch-action`을 더하지 않는다. iPad Scribble 같은 기기 손글씨 입력이 그대로 동작해야 한다 |
+| 저장 | 패드의 그림과 인식 결과는 storage·캐시에 두지 않는다. 사용자가 보낸 질문은 타이핑한 질문과 같은 기록 규칙을 따른다 |
 
 ## 서버 쪽에 필요한 변경
 
@@ -49,4 +63,4 @@ aio-app/
 
 ## 개발 흐름
 
-로컬 대시보드(Codex × Claude Code)가 이 저장소의 이슈를 만들고 두 봇(`kumoh-codex-bot`, `kumoh-claude-bot`)이 PR을 올린다. 검사 명령은 `node --test tests/home.test.mjs tests/router.test.mjs tests/api.test.mjs tests/pwa.test.mjs tests/chat-client.test.mjs tests/chat-history.test.mjs tests/chat-view.test.mjs tests/demo-login.test.mjs tests/graduation-view.test.mjs tests/calendar-view.test.mjs`다. 테스트 파일은 와일드카드 없이 하나씩 적는다.
+로컬 대시보드(Codex × Claude Code)가 이 저장소의 이슈를 만들고 두 봇(`kumoh-codex-bot`, `kumoh-claude-bot`)이 PR을 올린다. 검사 명령은 `node --test tests/home.test.mjs tests/router.test.mjs tests/api.test.mjs tests/pwa.test.mjs tests/chat-client.test.mjs tests/chat-history.test.mjs tests/chat-view.test.mjs tests/demo-login.test.mjs tests/graduation-view.test.mjs tests/calendar-view.test.mjs tests/appearance.test.mjs tests/handwriting-pad.test.mjs`다. 테스트 파일은 와일드카드 없이 하나씩 적는다.
