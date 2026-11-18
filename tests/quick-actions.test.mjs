@@ -55,6 +55,7 @@ class Node {
 
 function setup() {
   const doc = new Node(null, "document");
+  doc.body = new Node(doc, "body");
   doc.createElement = (tag) => new Node(doc, tag);
   doc.createElementNS = (_, tag) => new Node(doc, tag);
   doc.defaultView = { innerWidth: 320, innerHeight: 700, addEventListener() {}, matchMedia: () => ({ matches: true }) };
@@ -66,6 +67,17 @@ function setup() {
   const trigger = doc.createElement("button");
   const [svg, items] = ring.element.children;
   return { doc, ring, trigger, svg, items, selected };
+}
+
+// 취소하지 않은 pointerdown 뒤에는 호환 mousedown의 기본 포커스 이동이 이어진다.
+function outsidePointerSequence(doc, target) {
+  const event = doc.emit("pointerdown", { target });
+  if (!event.defaultPrevented) {
+    doc.emit("mousedown", { target });
+    (target.control ? target : doc.body).focus();
+  }
+  doc.emit("click", { target });
+  return event;
 }
 
 test("open, arrows, Escape and selection maintain focus and popup state", () => {
@@ -96,13 +108,14 @@ test("open, arrows, Escape and selection maintain focus and popup state", () => 
 test("blank outside returns focus while other controls and Tab retain their destination", async () => {
   const { doc, ring, trigger, items } = setup();
   ring.open(trigger);
-  doc.emit("pointerdown", { target: doc.createElement("div") });
+  const blankEvent = outsidePointerSequence(doc, doc.createElement("div"));
   assert.equal(doc.activeElement, trigger);
+  assert.equal(blankEvent.defaultPrevented, true);
   const other = doc.createElement("button");
   other.control = true;
   ring.open(trigger);
-  other.focus();
-  doc.emit("pointerdown", { target: other });
+  const controlEvent = outsidePointerSequence(doc, other);
+  assert.equal(controlEvent.defaultPrevented, undefined);
   assert.equal(doc.activeElement, other);
   assert.equal(ring.element.inert, true);
   ring.open(trigger);

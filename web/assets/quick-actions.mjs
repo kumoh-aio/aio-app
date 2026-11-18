@@ -180,6 +180,8 @@ export function createQuickActions({ doc, actions }) {
   doc.addEventListener("pointerdown", (event) => {
     if (!opened || element.contains(event.target) || trigger.contains(event.target)) return;
     const control = event.target.closest?.("button, a[href], input, textarea, select, summary, [tabindex], [contenteditable='true']");
+    // 빈 곳의 후속 mousedown 기본 동작이 복귀한 포커스를 body로 옮기지 않게 한다.
+    if (!control) event.preventDefault();
     close(!control);
   });
   doc.addEventListener("focusin", (event) => {
