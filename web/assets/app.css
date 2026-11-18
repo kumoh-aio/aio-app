@@ -441,6 +441,21 @@ a {
   border-top-color: var(--color-school-blue);
 }
 
+/* 탭 막대를 감싸는 .tab-dock이 있으면 화면 아래 고정은 래퍼가 맡고, .tab-bar는 relative로 선택 표시의
+   기준 상자가 된다. 래퍼가 없는 마크업에서는 위 .tab-bar의 fixed가 그대로 동작한다.
+   .tab-bar의 right·bottom·left: 0은 relative에서 위치를 옮기지 않고, z-index: 3은 표식(z-index: -1)의 쌓임 맥락이 된다. */
+.tab-dock {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+}
+
+.tab-dock > .tab-bar {
+  position: relative;
+}
+
 .visually-hidden {
   position: absolute;
   width: 1px;

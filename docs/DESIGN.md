@@ -284,7 +284,7 @@ Google Stitch로 만든 시안을 기준으로 한다. 내보낸 원본(HTML·�
 | `data-indicator-dir` | 컨테이너 | `forward`(오른쪽으로) 또는 `back`(왼쪽으로) |
 
 - 표식은 컨테이너의 `::before` 하나다. `pointer-events: none`, `z-index: -1`이고 세그먼트는 `isolation: isolate`로 표식이 바탕 밑으로 빠지지 않게 한다.
-- `.mode-group`은 `position: relative`다. `.tab-bar`는 `position: fixed`를 그대로 둔다. fixed도 relative처럼 절대 위치 `::before`의 기준 상자(padding 상자)가 되므로 좌표 계약은 같다. relative로 바꾸면 탭 막대가 화면 아래 고정에서 풀려 본문 끝으로 밀려난다.
+- `.mode-group`은 `position: relative`다. 아래 탭은 화면 아래 고정을 `<div class="tab-dock">` 래퍼가 맡고, 그 바로 아래 자식 `.tab-bar`가 `position: relative`로 표식의 기준 상자가 된다(`.tab-dock > .tab-bar`). 래퍼가 없는 마크업에서는 `.tab-bar`의 `position: fixed`가 남는다. fixed도 절대 위치 `::before`의 기준 상자(padding 상자)라 좌표 계약은 같다. 래퍼 없이 `.tab-bar`만 relative로 바꾸면 탭 막대가 본문 끝으로 밀려나므로 그렇게 하지 않는다.
 - 세그먼트 표식 색은 `:has(.mode-deep[aria-pressed="true"])`로 고른다. 모드용 속성을 따로 두지 않는다.
 - `instant`에서 표식은 `opacity: 0`으로 좌표에만 놓인다. 첫 선택 때 `ready`가 되면 표식이 이전 자리에서 보이며 출발하고, 버튼 채움·탭 위 선·음각양각 그림자가 표식으로 넘어간다. 전환은 `ready`에서만 건다.
 

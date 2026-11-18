@@ -645,9 +645,24 @@ test("선택 표시: data-indicator가 없으면 ::before를 만들지 않아 �
   const group = rule(".mode-group");
   assert.match(group, /position:\s*relative/);
   assert.match(group, /isolation:\s*isolate/, "z-index -1 표식이 세그먼트 바탕 밑으로 빠지지 않는다");
-  // 아래 탭은 화면 고정이라 이미 기준 상자다. relative로 덮으면 고정이 풀린다.
-  assert.match(rule(".tab-bar"), /position:\s*fixed/);
-  assert.doesNotMatch(css, /\.tab-bar[^{}]*\{[^{}]*position:\s*relative/);
+  // 아래 탭: .tab-dock 래퍼가 있으면 고정은 래퍼가, 기준 상자(relative)는 .tab-bar가 맡는다.
+  // 래퍼가 없는 마크업에서는 .tab-bar의 fixed가 남아 화면 아래 고정이 풀리지 않는다.
+  assert.match(rule(".tab-bar"), /position:\s*fixed/, "래퍼 없는 마크업의 기본값");
+  const dock = rule(".tab-dock");
+  assert.match(dock, /position:\s*fixed;\s*right:\s*0;\s*bottom:\s*0;\s*left:\s*0;\s*z-index:\s*3;/);
+  assert.match(rule(".tab-dock > .tab-bar"), /position:\s*relative/);
+  assert.ok(css.indexOf("\n.tab-dock > .tab-bar {") > css.indexOf("\n.tab-bar {"), "기본 fixed 뒤에서 덮어쓴다");
+  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!/position:\s*relative/.test(body)) continue;
+    for (const part of selector.split(",").map((text) => text.trim())) {
+      if (/\.tab-bar$/.test(part)) assert.equal(part, ".tab-dock > .tab-bar", "relative는 래퍼 안에서만 건다");
+    }
+  }
+  // 결합 체크아웃에서 래퍼를 쓰면 탭 막대가 래퍼의 바로 아래 자식이어야 relative 규칙이 걸린다.
+  const html = read("index.html");
+  if (html.includes("tab-dock")) {
+    assert.match(html, /<div class="tab-dock">\s*<nav class="tab-bar"[^>]*>[\s\S]*?<\/nav>\s*<\/div>/);
+  }
   assert.match(rule(".tab-bar[data-indicator]::before"), /top:\s*0;\s*height:\s*3px;\s*background:\s*var\(--color-school-blue\)/);
   assert.match(rule('.tab-bar[data-indicator="ready"] .tab[aria-current="page"]'), /border-top-color:\s*transparent/);
   const pressed = rule('.mode-group[data-indicator="ready"] .mode-button[aria-pressed="true"]');
