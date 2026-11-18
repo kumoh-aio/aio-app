@@ -431,9 +431,15 @@ a {
   border-left: 4px solid var(--color-sky);
 }
 
+/* 안내(guided) 답은 근거 카드가 아니라 일반 말풍선이다. 카드 그림자와 강조선을 걷어 낸다. */
 .answer-card[data-guided="true"] {
-  border-left-color: var(--color-border);
+  justify-self: start;
+  max-width: 85%;
+  padding: 10px 14px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: var(--radius-card) var(--radius-card) var(--radius-card) 4px;
+  box-shadow: none;
 }
 
 .answer-card[data-status="failed"] {

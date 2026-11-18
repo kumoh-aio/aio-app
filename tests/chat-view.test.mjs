@@ -112,18 +112,30 @@ function fakeStorage(initial = {}) {
   };
 }
 
-// 계약 모양의 가짜 기록 저장소: load() -> { sessionId, turns }, save(state) -> boolean, clear()
-function fakeHistory({ initial = { sessionId: null, turns: [] }, saveResult = true, load } = {}) {
+// 계약 모양의 가짜 기록 저장소: load() -> { sessionId, turns }, save(state) -> boolean, clear() -> boolean
+// chat-history처럼 질문 문자열이 message에 없는 차례는 저장하지 않고 버린다. 저장 내용은 load로 돌아온다.
+function fakeHistory({ initial = { sessionId: null, turns: [] }, saveResult = true, clearResult = true, load } = {}) {
   const calls = { saved: [], cleared: 0 };
+  let stored = structuredClone(initial);
   return {
     calls,
-    load: load ?? (() => structuredClone(initial)),
+    get stored() {
+      return stored;
+    },
+    load: load ?? (() => structuredClone(stored)),
     save(state) {
-      calls.saved.push(structuredClone(state));
+      const kept = {
+        sessionId: state.sessionId ?? null,
+        turns: state.turns.filter((turn) => typeof turn?.message === "string" && turn.message.trim()),
+      };
+      calls.saved.push(structuredClone(kept));
+      if (saveResult) stored = structuredClone(kept);
       return saveResult;
     },
     clear() {
       calls.cleared += 1;
+      if (clearResult) stored = { sessionId: null, turns: [] };
+      return clearResult;
     },
   };
 }
@@ -454,7 +466,7 @@ test("새 질문이 오면 앞선 요청을 취소하고 늦은 갱신은 버린
   assert.equal(part(firstItem, "data-answer").getAttribute("data-status"), "failed", "취소한 차례는 응답 중으로 남지 않는다");
   assert.equal(part(firstItem, "data-retry").hidden, false);
   assert.equal(part(secondItem, "data-answer-body").textContent, "새 답");
-  assert.deepEqual(history.calls.saved.at(-1).turns.map((t) => t.question), ["둘째 질문"]);
+  assert.deepEqual(history.calls.saved.at(-1).turns.map((t) => t.message), ["둘째 질문"]);
 });
 
 test("완료된 대화만 생각 원문 없이 저장하고, 복원 화면은 실시간 화면과 같다", async () => {
@@ -471,7 +483,10 @@ test("완료된 대화만 생각 원문 없이 저장하고, 복원 화면은 �
 
   const saved = history.calls.saved.at(-1);
   assert.equal(saved.sessionId, "virtual-session");
-  assert.equal(saved.turns.length, 3);
+  assert.equal(saved.turns.length, 3, "질문은 계약대로 message에 담겨 버려지지 않는다");
+  assert.deepEqual(saved.turns.map((t) => t.message), ["가상 하나", "가상 둘", "가상 셋"]);
+  assert.ok(saved.turns.every((t) => !("question" in t)));
+  assert.deepEqual(history.stored, saved);
   for (const turn of saved.turns) {
     assert.equal("thinking" in turn, false, "생각 원문은 저장하지 않는다");
     assert.equal(turn.status, "done");
@@ -482,8 +497,8 @@ test("완료된 대화만 생각 원문 없이 저장하고, 복원 화면은 �
   assert.equal(saved.turns[2].thinkingLabel, "思考了 2 秒");
   assert.deepEqual(saved.turns[1].citations, []);
 
-  // 저장된 그대로 다시 연다
-  const restored = mount({ history: fakeHistory({ initial: saved }) });
+  // 같은 기록 저장소로 앱을 다시 연다
+  const restored = mount({ history });
   assert.equal(restored.q.empty().hidden, true);
   assert.equal(restored.q.status().textContent, TEXT.restored);
   const strip = (item, p) => {
@@ -562,6 +577,69 @@ test("대화 지우기는 기록을 지우고 진행 중 요청을 취소한다"
   assert.equal(history.calls.saved.length, 0);
 });
 
+test("옛 question 키로 저장된 기록도 복원한다", () => {
+  const initial = { sessionId: null, turns: [
+    { message: "가상 새 키", answer: "가상 답 하나", citations: [] },
+    { question: "가상 옛 키", answer: "가상 답 둘", citations: [] },
+  ] };
+  const { q } = mount({ history: fakeHistory({ initial }) });
+  assert.deepEqual(q.users().map((u) => u.textContent), ["가상 새 키", "가상 옛 키"]);
+});
+
+test("기록 삭제가 실패하면 빈 기록으로 덮어쓰고, 그것도 막히면 화면을 지우지 않고 알린다", async () => {
+  // 삭제만 실패: 빈 기록 덮어쓰기로 지우고, 다시 열어도 돌아오지 않는다
+  const history = fakeHistory({ clearResult: false });
+  const first = mount({ history });
+  await first.chat.ask({ question: "가상 질문" });
+  assert.equal(history.stored.turns.length, 1);
+  first.q.clear().dispatch("click");
+  assert.equal(history.calls.cleared, 1);
+  assert.equal(first.q.items().length, 0);
+  assert.equal(mount({ history }).q.items().length, 0, "다시 열어도 지운 대화가 없다");
+
+  // 삭제와 덮어쓰기가 모두 실패: 화면은 그대로 두고 알린다
+  const stuck = fakeHistory({ clearResult: false, initial: { sessionId: null, turns: [{ message: "가상 남은 질문", answer: "가상 답" }] } });
+  stuck.save = () => false;
+  const second = mount({ history: stuck });
+  second.q.clear().dispatch("click");
+  assert.equal(second.q.items().length, 1);
+  assert.equal(second.q.status().textContent, TEXT.clearFailed);
+  assert.equal(mount({ history: stuck }).q.items().length, 1, "남은 기록과 화면이 일치한다");
+
+  // 예외도 실패로 본다
+  const throwing = fakeHistory();
+  throwing.clear = () => { throw new Error("가상 접근 거부"); };
+  throwing.save = () => { throw new Error("가상 접근 거부"); };
+  const third = mount({ history: throwing });
+  third.q.clear().dispatch("click");
+  assert.equal(third.q.status().textContent, TEXT.clearFailed);
+});
+
+test("홈과 아이오가 같은 저장 모드를 따른다: 아이오에서 바꾼 모드가 홈 질문에 이긴다", async () => {
+  const { send, calls } = fakeSend();
+  const storage = fakeStorage();
+  const { chat, q } = mount({ send, storage });
+  q.mode("deep").dispatch("click"); // 아이오에서 깊이 생각
+  assert.equal(storage.data.get(MODE_STORAGE_KEY), "deep");
+  await chat.ask({ question: "가상 질문", mode: "fast" }); // 홈은 처음 읽은 fast를 들고 있다
+  assert.equal(calls[0].mode, "deep");
+  assert.equal(q.mode("deep").getAttribute("aria-pressed"), "true");
+
+  storage.setItem(MODE_STORAGE_KEY, "fast"); // 홈에서 빠르게로 바꿈
+  chat.refresh();
+  assert.equal(q.mode("fast").getAttribute("aria-pressed"), "true");
+  q.input().value = "가상 질문 둘";
+  q.form().dispatch("submit");
+  await tick();
+  assert.equal(calls[1].mode, "fast");
+
+  // 저장소가 없으면 홈이 넘긴 값을 쓴다
+  const bare = fakeSend();
+  const noStore = mount({ send: bare.send, storage: null });
+  await noStore.chat.ask({ question: "가상 질문", mode: "deep" });
+  assert.equal(bare.calls[0].mode, "deep");
+});
+
 test("추천 칩은 현재 모드·언어로 질문한다", async () => {
   const { send, calls } = fakeSend();
   const { q } = mount({ send, storage: fakeStorage({ [MODE_STORAGE_KEY]: "deep", [LANG_STORAGE_KEY]: "en" }) });
@@ -595,6 +673,7 @@ test("app.js는 takePendingAsk 없이 showView에서 chat.ask를 부르고 chat-
   assert.match(source, /import\s*\{\s*createChatClient\s*\}\s*from\s*"\.\/chat-client\.mjs"/);
   assert.match(source, /import\s*\{\s*createChatHistory\s*\}\s*from\s*"\.\/chat-history\.mjs"/);
   assert.match(source, /route === "aio" && state\) chat\.ask\(state\)/);
+  assert.match(source, /else if \(route === "aio"\) chat\.refresh\(\)/);
   assert.ok(source.indexOf("mountChat(") < source.indexOf("router.start()"), "라우터보다 먼저 그린다");
   const html = read("../web/index.html");
   assert.match(html, /<section class="view" data-view="aio"[^>]*>\s*<h1 id="title-aio"[^>]*>아이오<\/h1>\s*<div id="chat-root" class="chat"><\/div>/);
@@ -609,6 +688,12 @@ test("app.css: 채팅 규칙은 포커스 규칙 앞에 있고 터치 영역은 
     const body = css.slice(at, css.indexOf("}", at));
     assert.match(body, /min-height:\s*var\(--touch\)/, selector);
   }
+  // 안내 답은 일반 말풍선: 공통 카드의 그림자와 굵은 왼쪽 강조선을 덮어쓴다
+  const guidedAt = css.indexOf('.answer-card[data-guided="true"] {');
+  assert.ok(guidedAt > css.indexOf(".answer-card {") && guidedAt > css.indexOf(".card {"), "카드 규칙 뒤에서 덮어쓴다");
+  const guided = css.slice(guidedAt, css.indexOf("}", guidedAt));
+  assert.match(guided, /box-shadow:\s*none/);
+  assert.match(guided, /border:\s*1px solid var\(--color-border\)/);
   assert.match(css, /@keyframes chat-pulse/);
   const reduced = css.indexOf("@media (prefers-reduced-motion: reduce)");
   assert.match(css.slice(reduced, reduced + 200), /animation: none !important/);

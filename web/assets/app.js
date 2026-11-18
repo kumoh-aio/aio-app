@@ -44,6 +44,7 @@ function showView({ route, state }) {
   firstRender = false;
   // 홈이 넘긴 질문은 URL에 넣지 않고 메모리로만 받는다. 같은 질문 객체는 chat이 한 번만 실행한다.
   if (route === "aio" && state) chat.ask(state);
+  else if (route === "aio") chat.refresh();
 }
 
 const router = createRouter({ win: window, onRoute: showView });

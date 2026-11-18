@@ -1,6 +1,6 @@
 // 아이오 채팅 화면. 문서 객체, 저장소, 전송 함수, 기록 저장소를 모두 주입받는다.
 // 서버가 보낸 글자는 textContent로만 넣는다. 전송·기록 형식은 chat-client·chat-history 계약을 따른다.
-import { FAQ, MODES, MODE_LABELS, readMode, saveMode, normalizeQuestion } from "./home.mjs";
+import { FAQ, MODES, MODE_LABELS, MODE_STORAGE_KEY, readMode, saveMode, normalizeQuestion } from "./home.mjs";
 
 export const LANGS = Object.freeze(["ko", "en", "zh"]);
 export const DEFAULT_LANG = "ko";
@@ -24,6 +24,7 @@ export const TEXT = Object.freeze({
   failed: "답을 받지 못했어요. 잠시 뒤 다시 시도해 주세요.",
   retry: "다시 묻기",
   saveFailed: "이 기기에 대화를 저장하지 못했어요. 대화는 화면에만 남아요.",
+  clearFailed: "이 기기에 저장된 대화를 지우지 못했어요. 잠시 뒤 다시 지워 주세요.",
   citationsTitle: "근거 조문",
   source: "원문 보기 ↗",
   thinking: "생각 과정",
@@ -183,7 +184,7 @@ export function mountChat({ root, doc, storage, send, history }) {
     const li = el(doc, "li");
     const button = el(doc, "button", { className: "chip", text: question, attrs: { type: "button", "data-chip": "" } });
     button.addEventListener("click", () => {
-      if (!active) run(question, mode);
+      if (!active) run(question, syncMode());
     });
     li.append(button);
     chipList.append(li);
@@ -215,7 +216,7 @@ export function mountChat({ root, doc, storage, send, history }) {
     }
     showInputError(false);
     input.value = "";
-    run(question, mode);
+    run(question, syncMode());
   });
   input.addEventListener("input", () => {
     if (!inputError.hidden && normalizeQuestion(input.value)) showInputError(false);
@@ -235,6 +236,20 @@ export function mountChat({ root, doc, storage, send, history }) {
     for (const button of modeButtons) {
       button.setAttribute("aria-pressed", button.getAttribute("data-mode") === mode ? "true" : "false");
     }
+  }
+
+  // 홈과 같은 저장 키를 쓴다. 마지막에 어느 화면에서 골랐든 저장된 값이 기준이다.
+  // 저장소가 없거나 읽기가 막히면 fallback(홈이 넘긴 값 또는 현재 값)을 쓴다.
+  function syncMode(fallback) {
+    let stored = null;
+    try {
+      stored = storage?.getItem(MODE_STORAGE_KEY) ?? null;
+    } catch {
+      stored = null;
+    }
+    const next = MODES.includes(stored) ? stored : MODES.includes(fallback) ? fallback : mode;
+    if (next !== mode) setMode(next, false);
+    return mode;
   }
 
   function setStatus(message, state) {
@@ -336,8 +351,9 @@ export function mountChat({ root, doc, storage, send, history }) {
   }
 
   function persist() {
+    // chat-history 계약은 질문을 message로 받는다(요청 본문과 같은 이름).
     const saved = turns.filter((t) => t.state.status === "done").map((t) => ({
-      question: t.question,
+      message: t.question,
       mode: t.mode,
       lang: t.lang,
       status: "done",
@@ -349,12 +365,7 @@ export function mountChat({ root, doc, storage, send, history }) {
       guided: t.state.guided,
       latencyMs: t.state.latencyMs,
     }));
-    let ok = false;
-    try {
-      ok = history.save({ sessionId, turns: saved }) !== false;
-    } catch {
-      ok = false;
-    }
+    const ok = tryHistory(() => history.save({ sessionId, turns: saved }));
     if (!ok) setStatus(TEXT.saveFailed, "save-failed");
     return ok;
   }
@@ -412,17 +423,30 @@ export function mountChat({ root, doc, storage, send, history }) {
     setBusy(false);
   }
 
+  // 기록 저장소 호출. false 반환과 예외를 모두 실패로 본다.
+  function tryHistory(fn) {
+    try {
+      return fn() !== false;
+    } catch {
+      return false;
+    }
+  }
+
   function clear() {
     cancelActive();
-    try {
-      history.clear();
-    } catch {
-      // 지우기 실패는 화면만 비운다.
+    // 지우기가 막히면 빈 기록으로 덮어쓴다. 그것도 막히면 다시 열 때 기록이 돌아오므로
+    // 화면도 비우지 않고 알린다.
+    const cleared = tryHistory(() => history.clear())
+      || tryHistory(() => history.save({ sessionId: null, turns: [] }));
+    if (!cleared) {
+      setStatus(TEXT.clearFailed, "clear-failed");
+      return false;
     }
     turns = [];
     sessionId = null;
     redrawLog();
     setStatus("", "idle");
+    return true;
   }
 
   function restore() {
@@ -435,7 +459,7 @@ export function mountChat({ root, doc, storage, send, history }) {
     if (!saved || !Array.isArray(saved.turns)) return;
     sessionId = typeof saved.sessionId === "string" && saved.sessionId ? saved.sessionId : null;
     for (const item of saved.turns) {
-      const question = normalizeQuestion(item?.question);
+      const question = normalizeQuestion(item?.message ?? item?.question);
       if (!question) continue;
       const state = normalizeState({ ...item, status: "done", thinking: "" });
       addTurn(question, MODES.includes(item.mode) ? item.mode : mode, LANGS.includes(item.lang) ? item.lang : lang, state);
@@ -455,8 +479,12 @@ export function mountChat({ root, doc, storage, send, history }) {
       seen.add(pending);
       const question = normalizeQuestion(pending.question);
       if (!question) return Promise.resolve(null);
-      if (MODES.includes(pending.mode)) setMode(pending.mode, false);
-      return run(question, pending.mode);
+      // 홈은 화면을 연 뒤 바뀐 모드를 모를 수 있다. 저장된 값이 있으면 그것을 따른다.
+      return run(question, syncMode(pending.mode));
+    },
+    /** 탭을 다시 열 때 다른 화면에서 바꾼 답변 모드를 반영한다. */
+    refresh() {
+      syncMode();
     },
     get busy() {
       return active !== null;
