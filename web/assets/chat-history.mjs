@@ -1,4 +1,4 @@
-﻿import { secureUrl } from "./api.mjs";
+import { secureUrl } from "./api.mjs";
 
 const HISTORY_KEY = "aio.chat.history.v2";
 const LEGACY_KEY = "aio.chat.history.v1";
@@ -75,6 +75,9 @@ export function createChatHistory({ storage } = {}) {
   const getStorage = () => storage === undefined ? globalThis.localStorage : storage;
 
   function save(state) {
+    // Reject the old view contract before normalization can erase stored versions.
+    if (Array.isArray(state?.turns) && state.turns.some((turn) =>
+      typeof turn?.message === "string" && !Array.isArray(turn.versions))) return false;
     const stored = normalizeHistory(state);
     try {
       const target = getStorage();

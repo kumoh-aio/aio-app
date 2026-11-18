@@ -1,4 +1,4 @@
-﻿import assert from "node:assert/strict";
+import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createChatHistory } from "../web/assets/chat-history.mjs";
 
@@ -56,6 +56,32 @@ test("migrates only completed v1 turns and removes v1 after writing v2", () => {
   assert.deepEqual(createChatHistory({ storage }).load(), expected);
   assert.equal(storage.getItem(V1), null);
   assert.deepEqual(JSON.parse(storage.getItem(V2)), expected);
+});
+
+test("rejects flat view saves without overwriting migrated or existing version history", () => {
+  const storage = fakeStorage();
+  const history = createChatHistory({ storage });
+  const legacy = JSON.stringify(state({ ...snapshot(), status: "done" }));
+  storage.setItem(V1, legacy);
+  const flat = state({ ...snapshot({ message: "새 가상 질문" }), status: "done" });
+
+  assert.equal(history.save(flat), false);
+  assert.equal(storage.getItem(V1), legacy);
+  assert.equal(storage.getItem(V2), null);
+
+  const migrated = history.load();
+  assert.deepEqual(migrated, state(turn(snapshot())));
+  const serialized = storage.getItem(V2);
+  assert.equal(history.save(flat), false);
+  assert.equal(storage.getItem(V2), serialized);
+  assert.deepEqual(history.load(), migrated);
+
+  const versioned = turn(snapshot(), snapshot({ message: "수정한 가상 질문" }));
+  assert.equal(history.save(state(versioned)), true);
+  const withVersions = storage.getItem(V2);
+  assert.equal(history.save(state(versioned, flat.turns[0])), false);
+  assert.equal(storage.getItem(V2), withVersions);
+  assert.deepEqual(history.load(), state(versioned));
 });
 
 test("returns all migrated turns and retains v1 when storage fails, even after quota trimming", () => {
