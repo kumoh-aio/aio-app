@@ -3,8 +3,13 @@ import { API_BASE } from "./config.mjs";
 import { createApi } from "./api.mjs";
 import { createRouter } from "./router.mjs";
 import { mountHome } from "./home.mjs";
+import { createChatClient } from "./chat-client.mjs";
+import { createChatHistory } from "./chat-history.mjs";
+import { mountChat, createPrefStorage, syncHomeMode } from "./chat-view.mjs";
 
-const api = createApi({ base: API_BASE, fetchImpl: globalThis.fetch.bind(globalThis) });
+const fetchImpl = globalThis.fetch.bind(globalThis);
+const api = createApi({ base: API_BASE, fetchImpl });
+const chatClient = createChatClient({ base: API_BASE, fetchImpl });
 
 function safeStorage() {
   try {
@@ -14,12 +19,25 @@ function safeStorage() {
   }
 }
 
-// 다음 이슈(채팅 화면)가 받아 갈 질문. URL에 넣지 않고 메모리에만 둔다.
-let pendingAsk = null;
+const storage = safeStorage();
+// 답변 모드·언어는 홈과 아이오가 같은 값을 보도록 메모리를 겸한 설정 저장소로 공유한다.
+// 대화 기록은 용량 오류를 직접 다뤄야 하므로 원래 저장소를 그대로 쓴다.
+const prefs = createPrefStorage(storage);
+const homeRoot = document.getElementById("home-root");
+
+// 라우터보다 먼저 그려 둔다. 첫 화면이 #/aio여도 ask를 받을 수 있다.
+const chat = mountChat({
+  root: document.getElementById("chat-root"),
+  doc: document,
+  storage: prefs,
+  send: (request) => chatClient.send(request),
+  history: createChatHistory({ storage }),
+});
+
+let home = null;
 let firstRender = true;
 
 function showView({ route, state }) {
-  if (route === "aio" && state) pendingAsk = state;
   for (const view of document.querySelectorAll("[data-view]")) {
     view.hidden = view.getAttribute("data-view") !== route;
   }
@@ -29,25 +47,24 @@ function showView({ route, state }) {
   }
   if (!firstRender) document.getElementById(`title-${route}`)?.focus();
   firstRender = false;
+  // 홈이 넘긴 질문은 URL에 넣지 않고 메모리로만 받는다. 같은 질문 객체는 chat이 한 번만 실행한다.
+  if (route === "aio" && state) chat.ask(state);
+  else if (route === "aio") chat.refresh();
+  // 아이오에서 바꾼 모드를 홈 표시에도 반영한다.
+  if (route === "home") syncHomeMode({ home, root: homeRoot, storage: prefs });
 }
 
 const router = createRouter({ win: window, onRoute: showView });
 
-mountHome({
-  root: document.getElementById("home-root"),
+home = mountHome({
+  root: homeRoot,
   doc: document,
-  storage: safeStorage(),
+  storage: prefs,
   loadCampusGuide: () => api.campusGuide(),
   navigate: (route, state) => router.navigate(route, state),
 });
 
 router.start();
-
-export function takePendingAsk() {
-  const ask = pendingAsk;
-  pendingAsk = null;
-  return ask;
-}
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {

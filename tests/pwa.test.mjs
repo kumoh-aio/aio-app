@@ -1,10 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import vm from "node:vm";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { makeIcons } from "../tools/make-icons.mjs";
+import { inflateSync } from "node:zlib";
+import { ICON_SIZES, iconPng } from "../tools/make-icons.mjs";
 const webRoot = new URL("../web/", import.meta.url);
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url));
 const generatedIcons = new Map([
@@ -12,10 +11,37 @@ const generatedIcons = new Map([
 ]);
 const files = ["./", "index.html", "manifest.webmanifest", "assets/app.css", "assets/app.js",
   "assets/home.mjs", "assets/router.mjs", "assets/config.mjs", "assets/api.mjs",
+  "assets/chat-view.mjs", "assets/chat-client.mjs", "assets/chat-history.mjs",
   ...generatedIcons.keys()];
-const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/home.mjs", "assets/router.mjs"];
-const requireScreen = process.env.AIO_REQUIRE_FULL_SHELL === "1" ||
-  screenFiles.some((file) => existsSync(new URL(file, webRoot)));
+const requireFullShell = process.env.AIO_REQUIRE_FULL_SHELL === "1";
+const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/home.mjs", "assets/router.mjs",
+  "assets/chat-view.mjs"];
+const requireScreen = requireFullShell || screenFiles.some((file) => existsSync(new URL(file, webRoot)));
+// 작업 A(다른 브랜치)가 만드는 모듈. 이 체크아웃에 없을 때만 건너뛴다(AIO_REQUIRE_FULL_SHELL=1이면 필수).
+const taskAFiles = ["assets/chat-client.mjs", "assets/chat-history.mjs"];
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ ((crc & 1) * 0xedb88320);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function pngChunks(png) {
+  const chunks = [];
+  for (let offset = 8; offset < png.length;) {
+    const length = png.readUInt32BE(offset);
+    const type = png.toString("ascii", offset + 4, offset + 8);
+    const data = png.subarray(offset + 8, offset + 8 + length);
+    const crc = png.readUInt32BE(offset + 8 + length);
+    assert.equal(crc, crc32(png.subarray(offset + 4, offset + 8 + length)), `${type} CRC mismatch`);
+    chunks.push({ type, data });
+    offset += 12 + length;
+  }
+  return chunks;
+}
 
 function assertFile(file) {
   assert.ok(statSync(file, { throwIfNoEntry: false })?.isFile(), `Missing cache file: ${file.pathname}`);
@@ -30,17 +56,15 @@ function worker(scope = "https://example.invalid/app/") {
     self: { registration: { scope }, addEventListener: (name, handler) => { events[name] = handler; },
       clients: { claim: async () => { calls.claimed += 1; } } },
     caches: { open: async (name) => { calls.opened.push(name); return cache; },
-      keys: async () => ["aio-shell-v0", "aio-shell-v1", "unrelated"],
+      keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
     fetch: async (request) => { calls.fetched.push(request); return "network"; },
   });
   return { events, calls, cache };
 }
 
-test("manifest and real PNG icon dimensions match", (context) => {
-  const directory = mkdtempSync(join(tmpdir(), "aio-icons-"));
-  context.after(() => rmSync(directory, { recursive: true, force: true }));
-  const iconFiles = makeIcons(directory);
+test("manifest and real PNG icon dimensions match", () => {
+  assert.deepEqual(ICON_SIZES, [192, 512]);
   const manifest = JSON.parse(read("web/manifest.webmanifest"));
   assert.equal(manifest.name, "아이오 · 금오공대 학사 행정");
   assert.equal(manifest.short_name, "아이오");
@@ -51,11 +75,17 @@ test("manifest and real PNG icon dimensions match", (context) => {
   for (const icon of manifest.icons) {
     const size = Number(icon.sizes.split("x")[0]);
     assert.equal(generatedIcons.get(icon.src), size);
-    const png = readFileSync(iconFiles[size]);
+    const png = iconPng(size);
+    assert.ok(Buffer.isBuffer(png));
     assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
     assert.equal(png.toString("ascii", 12, 16), "IHDR");
     assert.equal(png.readUInt32BE(16), size);
     assert.equal(png.readUInt32BE(20), size);
+    const chunks = pngChunks(png); // Verifies every chunk CRC.
+    assert.equal(chunks[0].type, "IHDR");
+    assert.equal(chunks.at(-1).type, "IEND");
+    const idat = Buffer.concat(chunks.filter((entry) => entry.type === "IDAT").map((entry) => entry.data));
+    assert.equal(inflateSync(idat).length, size * (size * 3 + 1));
   }
 });
 
@@ -80,16 +110,21 @@ test("precache files exist or are generated icons", async () => {
     if (generatedIcons.has(file)) continue; // PNG dimensions are checked in the generator test.
     const path = file || "index.html"; // The scope root is served by index.html.
     if (!requireScreen && screenFiles.includes(path)) continue;
-    assertFile(new URL(path, webRoot));
+    const target = new URL(path, webRoot);
+    if (!requireFullShell && taskAFiles.includes(path) && !existsSync(target)) continue;
+    assertFile(target);
   }
 });
 
-test("activate removes only older app caches", async () => {
+test("activate removes only older app caches and keeps CACHE_NAME v2", async () => {
   const { events, calls } = worker();
   let pending;
+  events.install({ waitUntil: (promise) => { pending = promise; } });
+  await pending;
+  assert.deepEqual(calls.opened, ["aio-shell-v2"]); // CACHE_NAME is aio-shell-v2.
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.deleted, ["aio-shell-v0"]);
+  assert.deepEqual(calls.deleted, ["aio-shell-v0", "aio-shell-v1"]);
   assert.equal(calls.claimed, 1);
 });
 
