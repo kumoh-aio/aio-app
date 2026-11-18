@@ -44,9 +44,9 @@ aio-app/
 
 | 대상 | 방법 |
 | --- | --- |
-| PWA | `web/`을 정적 사이트로 올린다. 비공개 저장소라 무료 GitHub Pages는 쓸 수 없으므로 Render 무료 정적 사이트를 쓴다(Render에 kumoh-aio 조직 접근 허용 필요) |
-| 안드로이드 APK | GitHub Actions에서 Capacitor로 `web/`을 감싸 Gradle로 빌드하고, 결과 APK를 실행 결과물(artifact)과 릴리스에 올린다. 서명 키는 저장소 비밀값(secrets)에만 둔다 |
+| PWA | 빌드 명령 `node tools/make-icons.mjs`로 아이콘을 만든 뒤 `web/`을 정적 사이트로 올린다. 비공개 저장소라 무료 GitHub Pages는 쓸 수 없으므로 Render 무료 정적 사이트를 쓴다(Render에 kumoh-aio 조직 접근 허용 필요) |
+| 안드로이드 APK | GitHub Actions에서 `node tools/make-icons.mjs`로 아이콘을 만들고 Capacitor로 `web/`을 감싸 Gradle로 빌드하고, 결과 APK를 실행 결과물(artifact)과 릴리스에 올린다. 서명 키는 저장소 비밀값(secrets)에만 둔다 |
 
 ## 개발 흐름
 
-로컬 대시보드(Codex × Claude Code)가 이 저장소의 이슈를 만들고 두 봇(`kumoh-codex-bot`, `kumoh-claude-bot`)이 PR을 올린다. 검사 명령은 `node --test tests/*.test.mjs`다.
+로컬 대시보드(Codex × Claude Code)가 이 저장소의 이슈를 만들고 두 봇(`kumoh-codex-bot`, `kumoh-claude-bot`)이 PR을 올린다. 검사 명령은 `node --test tests/home.test.mjs tests/router.test.mjs tests/api.test.mjs tests/pwa.test.mjs`다.
