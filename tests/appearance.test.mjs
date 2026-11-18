@@ -278,6 +278,23 @@ test("달력 격자는 9% 헤어라인과 대체 경계를 쓰고 좁은 화면�
   assert.doesNotMatch(css.slice(calendarAt, css.indexOf(".more {")), /gradient|backdrop-filter/);
 });
 
+// 분류색은 CSS만으로 정할 수 없고 카드 렌더러가 calendar-cat-* 클래스를 붙여야 한다.
+// CSS 규칙만 보던 검사는 렌더러 누락을 놓쳤으므로, 달력 보기가 합쳐진 코드에서는 렌더러 원문을 직접 본다.
+test("통합 달력 보기: 일정 카드 렌더러가 분류 클래스를 붙이고 요일 머리 행을 그린다", (t) => {
+  const source = read("assets/calendar-view.mjs");
+  const integrated = process.env.AIO_REQUIRE_FULL_SHELL === "1" || source.includes("calendar-month");
+  if (!integrated) {
+    t.skip("달력 보기 모듈이 아직 이 체크아웃에 합쳐지지 않았음");
+    return;
+  }
+  const renderer = source.match(/^([ \t]*)(?:export\s+)?function renderEvent\s*\([^)]*\)\s*\{([\s\S]*?)\n\1\}/m);
+  assert.ok(renderer, "목록과 고른 날 목록이 함께 쓰는 renderEvent 함수");
+  const body = renderer[2];
+  assert.match(body, /calendar-event/, "renderEvent가 일정 카드를 만든다");
+  assert.match(body, /calendar-cat-|categor|classif/i,
+    "같은 날 가상 시험·휴일 카드도 분류 클래스를 받아야 목록 보기와 고른 날 목록의 왼쪽 선이 분류색이 된다");  assert.match(source, /["']columnheader["']/, "격자 첫 행에 일~토 요일 머리를 그린다");
+});
+
 test("음각양각은 카드와 탭에 볼록한 그림자, 입력과 선택 상태에 오목한 그림자를 준다", () => {
   const css = read("assets/app.css");
   const effect = css.match(/html\[data-theme="neumorphic"\]\s*\{([^{}]*)\}/)?.[1] ?? "";
