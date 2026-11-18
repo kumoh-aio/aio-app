@@ -150,6 +150,31 @@ test("filtered decoration is separate from menu buttons and coordinates use cust
   assert.match(group.children[0].getAttribute("--qa-y"), /px$/);
 });
 
+test("320×180 fallback keeps measured labels inside the viewport without overlaps", () => {
+  const { doc, ring, trigger, items } = setup();
+  doc.defaultView.innerHeight = 180;
+  trigger.getBoundingClientRect = () => ({ left: 0, top: 0, width: 48, height: 48 });
+  const widths = [64, 85, 110, 82];
+  items.children.forEach((button, index) => {
+    button.children[1].offsetWidth = widths[index];
+    button.children[1].offsetHeight = 22;
+  });
+  ring.open(trigger, { lang: "en" });
+  const coord = (button, name) => Number.parseFloat(button.getAttribute(`--qa-${name}`));
+  const boxes = items.children.map((button, index) => ({
+    x: 24 + coord(button, "x") + coord(button, "label-x"),
+    y: 24 + coord(button, "y") + coord(button, "label-y"),
+    width: widths[index],
+  }));
+  assert.ok(new Set(boxes.map(({ y }) => y)).size > 1);
+  boxes.forEach(({ x, y, width }, index) => {
+    assert.ok(x >= 4 && x + width <= 316 && y >= 4 && y + 22 <= 176);
+    for (const other of boxes.slice(index + 1)) {
+      assert.ok(x + width <= other.x || other.x + other.width <= x || y + 22 <= other.y || other.y + 22 <= y);
+    }
+  });
+});
+
 test("closing transition can be interrupted by reopening", async () => {
   const { doc, ring, trigger } = setup();
   doc.defaultView.matchMedia = () => ({ matches: false });

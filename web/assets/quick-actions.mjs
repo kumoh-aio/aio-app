@@ -42,8 +42,42 @@ export function arcLayout({ origin, viewport, size = 48, gap = 12, count }) {
   const columns = Math.max(1, Math.floor((viewport.width - 16 + gap) / (size + gap)));
   return Array.from({ length: count }, (_, index) => ({
     x: inset + (index % columns) * (size + gap),
-    y: inset + Math.floor(index / columns) * (size + gap),
+    y: inset + (viewport.height >= size + 60 ? 22 : 0) + Math.floor(index / columns) * (size + gap),
   }));
+}
+
+function placeLabels(points, dimensions, viewport, size) {
+  const radius = size / 2;
+  const margin = 4;
+  const bubbles = points.map(({ x, y }) => ({ x: x - radius, y: y - radius, width: size, height: size }));
+  const placed = [];
+  const fits = (label, obstacles) => label.y >= margin && label.y + label.height <= viewport.height - margin
+    && obstacles.every((box) => label.x + label.width + margin <= box.x || box.x + box.width + margin <= label.x
+      || label.y + label.height + margin <= box.y || box.y + box.height + margin <= label.y);
+
+  return points.map((point, index) => {
+    const { width, height } = dimensions[index];
+    const clampX = (x) => Math.max(margin, Math.min(x, viewport.width - margin - width));
+    const center = clampX(point.x - width / 2);
+    const obstacles = [...bubbles, ...placed];
+    const xs = [center, ...obstacles.flatMap((box) => [clampX(box.x - width - margin), clampX(box.x + box.width + margin)])];
+    const above = point.y - radius - margin - height;
+    const below = point.y + radius + margin;
+    const ys = [above, below, ...obstacles.flatMap((box) => [box.y - height - margin, box.y + box.height + margin])];
+    let best;
+    let distance = Infinity;
+    for (const y of ys) {
+      for (const x of xs) {
+        const candidate = { x, y, width, height };
+        const offset = Math.hypot(x - center, y + height / 2 - point.y);
+        if (offset >= distance || !fits(candidate, obstacles)) continue;
+        best = candidate;
+        distance = offset;
+      }
+    }
+    if (best) placed.push(best);
+    return best ?? { x: center, y: above >= margin ? above : below };
+  });
 }
 
 export function nextIndex(key, index, count) {
@@ -136,11 +170,17 @@ export function createQuickActions({ doc, actions }) {
     element.style.setProperty("--qa-origin-x", `${origin.x}px`);
     element.style.setProperty("--qa-origin-y", `${origin.y}px`);
     svg.setAttribute("viewBox", `${-origin.x} ${-origin.y} ${viewport.width} ${viewport.height}`);
-    arcLayout({ origin, viewport, size: 48, gap: 16, count: buttons.length }).forEach((point, i) => {
+    const size = 48;
+    const points = arcLayout({ origin, viewport, size, gap: 16, count: buttons.length });
+    const dimensions = labels.map((label) => ({ width: label.offsetWidth || 88, height: label.offsetHeight || 22 }));
+    const boxes = placeLabels(points, dimensions, viewport, size);
+    points.forEach((point, i) => {
       for (const node of [buttons[i], blobs[i]]) {
         node.style.setProperty("--qa-x", `${point.x - origin.x}px`);
         node.style.setProperty("--qa-y", `${point.y - origin.y}px`);
       }
+      buttons[i].style.setProperty("--qa-label-x", `${boxes[i].x - point.x}px`);
+      buttons[i].style.setProperty("--qa-label-y", `${boxes[i].y - point.y}px`);
     });
   }
 
