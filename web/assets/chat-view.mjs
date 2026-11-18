@@ -52,6 +52,53 @@ export function saveLang(storage, lang) {
   }
 }
 
+// 저장된 답변 모드. 없거나 잘못된 값, 읽기 오류면 null(readMode와 달리 기본값을 채우지 않는다).
+function storedMode(storage) {
+  try {
+    const value = storage?.getItem(MODE_STORAGE_KEY);
+    return MODES.includes(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+const PREF_KEYS = Object.freeze([MODE_STORAGE_KEY, LANG_STORAGE_KEY]);
+
+/**
+ * 홈과 아이오가 함께 쓰는 설정 저장소. 모드·언어 키는 메모리에 먼저 적어 두므로
+ * 기기 저장이 막혀도 두 화면이 같은 값을 읽는다. 쓰기 오류는 그대로 던져 호출자가 처리한다.
+ * 대화 기록처럼 용량 오류를 직접 다뤄야 하는 키는 감싸지 않으므로 기록 모듈에는 원래 저장소를 준다.
+ */
+export function createPrefStorage(storage, keys = PREF_KEYS) {
+  const memory = new Map();
+  return {
+    getItem(key) {
+      if (keys.includes(key) && memory.has(key)) return memory.get(key);
+      return storage ? storage.getItem(key) : null;
+    },
+    setItem(key, value) {
+      if (keys.includes(key)) memory.set(key, String(value));
+      if (storage) storage.setItem(key, value);
+      else if (!keys.includes(key)) throw new Error("storage unavailable");
+    },
+    removeItem(key) {
+      memory.delete(key);
+      storage?.removeItem?.(key);
+    },
+  };
+}
+
+/**
+ * 홈 화면이 처음 읽은 모드를 저장된 최신 모드로 맞춘다. home.mjs에는 갱신 함수가 없어서
+ * 홈의 모드 버튼을 눌러 홈 자신의 처리기로 다시 그리게 한다. 맞췄으면 true.
+ */
+export function syncHomeMode({ home, root, storage }) {
+  const want = storedMode(storage);
+  if (!home || !want || home.mode === want) return false;
+  root?.querySelector?.(`[data-mode="${want}"]`)?.click?.();
+  return home.mode === want;
+}
+
 /** https: 주소만 돌려준다. 그 밖에는 null. 전송 모듈이 거르더라도 화면에서 한 번 더 막는다. */
 export function safeSourceUrl(value) {
   if (typeof value !== "string" || /\s/.test(value)) return null;
@@ -125,6 +172,8 @@ export function mountChat({ root, doc, storage, send, history }) {
     throw new TypeError("mountChat needs root, doc, send and history");
   }
   let mode = readMode(storage);
+  let seenStored = storedMode(storage);
+  let pickedHere = false; // 이 화면에서 사용자가 모드를 골랐는지
   let lang = readLang(storage);
   let sessionId = null;
   let turns = []; // { question, mode, lang, state, view }
@@ -232,23 +281,27 @@ export function mountChat({ root, doc, storage, send, history }) {
   function setMode(value, persist) {
     if (!MODES.includes(value)) return;
     mode = value;
-    if (persist) saveMode(storage, value);
+    if (persist) {
+      saveMode(storage, value);
+      pickedHere = true;
+    }
+    // 쓰기가 막혔다면 예전 값이 그대로 남는다. 그 값을 "본 값"으로 기억해 다른 화면의 변경과 구분한다.
+    seenStored = storedMode(storage);
     for (const button of modeButtons) {
       button.setAttribute("aria-pressed", button.getAttribute("data-mode") === mode ? "true" : "false");
     }
   }
 
-  // 홈과 같은 저장 키를 쓴다. 마지막에 어느 화면에서 골랐든 저장된 값이 기준이다.
-  // 저장소가 없거나 읽기가 막히면 fallback(홈이 넘긴 값 또는 현재 값)을 쓴다.
+  // 홈과 같은 저장 키를 쓴다. 마지막으로 본 저장값과 달라졌을 때만 다른 화면이 바꾼 것으로 보고 따른다.
+  // 저장값이 그대로면(쓰기 실패 포함) 이 화면에서 고른 값을 지킨다. 저장소를 못 쓰면 fallback(홈이 넘긴 값)을 쓴다.
   function syncMode(fallback) {
-    let stored = null;
-    try {
-      stored = storage?.getItem(MODE_STORAGE_KEY) ?? null;
-    } catch {
-      stored = null;
+    const stored = storedMode(storage);
+    if (stored && stored !== seenStored) {
+      setMode(stored, false);
+      pickedHere = false;
+    } else if (!stored && !pickedHere && MODES.includes(fallback)) {
+      setMode(fallback, false); // 저장값이 전혀 없을 때만 홈이 넘긴 값을 쓰고, 여기서 고른 값은 지킨다
     }
-    const next = MODES.includes(stored) ? stored : MODES.includes(fallback) ? fallback : mode;
-    if (next !== mode) setMode(next, false);
     return mode;
   }
 

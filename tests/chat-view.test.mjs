@@ -12,8 +12,10 @@ import {
   thinkingTitle,
   normalizeState,
   mountChat,
+  createPrefStorage,
+  syncHomeMode,
 } from "../web/assets/chat-view.mjs";
-import { FAQ, MODE_STORAGE_KEY } from "../web/assets/home.mjs";
+import { FAQ, MODE_STORAGE_KEY, mountHome } from "../web/assets/home.mjs";
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
@@ -83,6 +85,15 @@ class FakeElement {
   }
   focus() {
     this.ownerDocument.activeElement = this;
+  }
+  click() {
+    this.dispatch("click");
+  }
+  // [이름="값"] 모양 선택자만 지원한다.
+  querySelector(selector) {
+    const match = /^\[([\w-]+)="([^"]*)"\]$/.exec(selector);
+    assert.ok(match, `지원하지 않는 선택자: ${selector}`);
+    return this.find((n) => n !== this && n.getAttribute(match[1]) === match[2]);
   }
   *walk() {
     yield this;
@@ -640,6 +651,89 @@ test("홈과 아이오가 같은 저장 모드를 따른다: 아이오에서 바
   assert.equal(bare.calls[0].mode, "deep");
 });
 
+// 읽기는 되고 쓰기만 막힌 저장소(예: 용량 초과). 예전 값이 그대로 남는다.
+function writeBlockedStorage(initial = {}) {
+  const storage = fakeStorage(initial);
+  storage.setItem = () => { throw new Error("가상 쓰기 거부"); };
+  return storage;
+}
+
+test("쓰기만 막혀 예전 모드가 남아도 아이오에서 고른 모드로 보낸다", async () => {
+  const { send, calls } = fakeSend();
+  const storage = writeBlockedStorage({ [MODE_STORAGE_KEY]: "fast" });
+  const { chat, q } = mount({ send, storage });
+  q.mode("deep").dispatch("click");
+  q.input().value = "가상 질문";
+  q.form().dispatch("submit");
+  await tick();
+  assert.equal(calls[0].mode, "deep");
+  chat.refresh();
+  assert.equal(q.mode("deep").getAttribute("aria-pressed"), "true");
+  q.chips()[0].dispatch("click");
+  await tick();
+  assert.equal(calls[1].mode, "deep");
+
+  // 저장값이 아예 없고 쓰기도 막혔을 때: 여기서 고른 값이 홈이 들고 온 옛 값에 지지 않는다
+  const bare = fakeSend();
+  const empty = mount({ send: bare.send, storage: writeBlockedStorage() });
+  empty.q.mode("deep").dispatch("click");
+  await empty.chat.ask({ question: "가상 질문", mode: "fast" });
+  assert.equal(bare.calls[0].mode, "deep");
+});
+
+test("createPrefStorage: 모드·언어는 메모리에 먼저 남기고 쓰기 오류는 그대로 알린다", () => {
+  const real = writeBlockedStorage({ [MODE_STORAGE_KEY]: "fast", other: "가상" });
+  const prefs = createPrefStorage(real);
+  assert.equal(prefs.getItem(MODE_STORAGE_KEY), "fast");
+  assert.throws(() => prefs.setItem(MODE_STORAGE_KEY, "deep"), /가상 쓰기 거부/);
+  assert.equal(prefs.getItem(MODE_STORAGE_KEY), "deep", "쓰기가 막혀도 두 화면이 같은 값을 본다");
+  assert.throws(() => prefs.setItem("other", "x"));
+  assert.equal(prefs.getItem("other"), "가상", "설정 키가 아니면 감싸지 않는다");
+
+  const none = createPrefStorage(null);
+  assert.equal(none.getItem(LANG_STORAGE_KEY), null);
+  assert.doesNotThrow(() => none.setItem(LANG_STORAGE_KEY, "en"));
+  assert.equal(none.getItem(LANG_STORAGE_KEY), "en");
+  assert.throws(() => none.setItem("other", "x"));
+});
+
+for (const [name, real] of [["정상 저장소", () => fakeStorage()], ["쓰기 막힌 저장소", () => writeBlockedStorage({ [MODE_STORAGE_KEY]: "fast" })]]) {
+  test(`홈 복귀 시 아이오에서 바꾼 모드를 홈 표시와 전송에 반영한다(${name})`, async () => {
+    const doc = fakeDocument();
+    const prefs = createPrefStorage(real());
+    const homeRoot = doc.createElement("div");
+    const moves = [];
+    const home = mountHome({ root: homeRoot, doc, storage: prefs, loadCampusGuide: async () => [], navigate: (route, state) => moves.push(state) });
+    await home.ready;
+    const { send, calls } = fakeSend();
+    const chatRoot = doc.createElement("div");
+    const chat = mountChat({ root: chatRoot, doc, storage: prefs, send, history: fakeHistory() });
+    const homeButton = (value) => homeRoot.find((n) => n.getAttribute("data-mode") === value);
+    assert.equal(home.mode, "fast");
+
+    chatRoot.find((n) => n.getAttribute("data-mode") === "deep").dispatch("click"); // 아이오에서 깊이 생각
+    assert.equal(syncHomeMode({ home, root: homeRoot, storage: prefs }), true); // 홈으로 돌아옴
+    assert.equal(home.mode, "deep");
+    assert.equal(homeButton("deep").getAttribute("aria-pressed"), "true");
+    assert.equal(homeButton("fast").getAttribute("aria-pressed"), "false");
+    assert.equal(syncHomeMode({ home, root: homeRoot, storage: prefs }), false, "이미 같으면 건드리지 않는다");
+
+    homeRoot.find((n) => n.hasAttribute("data-faq")).dispatch("click"); // 홈에서 질문
+    assert.equal(moves.at(-1).mode, "deep");
+    await chat.ask(moves.at(-1));
+    assert.equal(calls[0].mode, "deep");
+
+    homeButton("fast").dispatch("click"); // 홈에서 다시 빠르게
+    chat.refresh();
+    assert.equal(chatRoot.find((n) => n.getAttribute("data-mode") === "fast").getAttribute("aria-pressed"), "true");
+  });
+}
+
+test("syncHomeMode는 홈이나 저장값이 없으면 아무것도 하지 않는다", () => {
+  assert.equal(syncHomeMode({ home: null, root: null, storage: fakeStorage({ [MODE_STORAGE_KEY]: "deep" }) }), false);
+  assert.equal(syncHomeMode({ home: { mode: "fast" }, root: null, storage: fakeStorage() }), false);
+});
+
 test("추천 칩은 현재 모드·언어로 질문한다", async () => {
   const { send, calls } = fakeSend();
   const { q } = mount({ send, storage: fakeStorage({ [MODE_STORAGE_KEY]: "deep", [LANG_STORAGE_KEY]: "en" }) });
@@ -669,7 +763,11 @@ test("chat-view.mjs는 innerHTML류와 외부 주소를 쓰지 않고 이름 규
 test("app.js는 takePendingAsk 없이 showView에서 chat.ask를 부르고 chat-root에 그린다", () => {
   const source = read("../web/assets/app.js");
   assert.doesNotMatch(source, /takePendingAsk|pendingAsk/);
-  assert.match(source, /import\s*\{\s*mountChat\s*\}\s*from\s*"\.\/chat-view\.mjs"/);
+  assert.match(source, /import\s*\{\s*mountChat,\s*createPrefStorage,\s*syncHomeMode\s*\}\s*from\s*"\.\/chat-view\.mjs"/);
+  assert.match(source, /const prefs = createPrefStorage\(storage\)/);
+  assert.match(source, /createChatHistory\(\{\s*storage\s*\}\)/, "기록은 원래 저장소를 쓴다");
+  assert.equal([...source.matchAll(/storage: prefs/g)].length, 3, "홈·아이오·홈 동기화가 같은 설정 저장소를 쓴다");
+  assert.match(source, /if \(route === "home"\) syncHomeMode\(\{ home, root: homeRoot, storage: prefs \}\)/);
   assert.match(source, /import\s*\{\s*createChatClient\s*\}\s*from\s*"\.\/chat-client\.mjs"/);
   assert.match(source, /import\s*\{\s*createChatHistory\s*\}\s*from\s*"\.\/chat-history\.mjs"/);
   assert.match(source, /route === "aio" && state\) chat\.ask\(state\)/);
