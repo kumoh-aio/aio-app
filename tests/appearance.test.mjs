@@ -249,9 +249,12 @@ test("달력 격자는 9% 헤어라인과 대체 경계를 쓰고 좁은 화면�
   };
   assert.match(rule(".calendar-month"), /--calendar-line:\s*var\(--color-border\)/);
   assert.match(css, /@supports \(color: color-mix\(in srgb, red 9%, transparent\)\)\s*\{\s*\.calendar-month\s*\{\s*--calendar-line:\s*color-mix\(in srgb, var\(--color-text\) 9%, transparent\);/);
-  assert.match(rule(".calendar-week"), /grid-template-columns:\s*repeat\(7, minmax\(0, 1fr\)\)/);
-  assert.match(rule(".calendar-bars"), /grid-template-columns:\s*repeat\(7, minmax\(0, 1fr\)\)/);
-  assert.match(rule(".calendar-bars"), /pointer-events:\s*none/, "막대는 칸 누르기를 막지 않는다");
+  // 320px 화면: 본문 여백(16px×2)과 테두리를 빼면 7열이 44px 밑으로 내려가므로 열 최소값과 여백 밖 확장을 둔다.
+  assert.match(rule(".calendar-week"), /grid-template-columns:\s*repeat\(7, minmax\(var\(--touch\), 1fr\)\)/);
+  assert.match(rule(".calendar-bars"), /grid-template-columns:\s*repeat\(7, minmax\(var\(--touch\), 1fr\)\)/);
+  assert.match(rule(".calendar-month"), /overflow-x:\s*auto/);
+  const smallest = [...css.matchAll(/@media \(max-width: 380px\)\s*\{([\s\S]*?)\n\}/g)].map(([, body]) => body).join("\n");
+  assert.match(smallest, /\.calendar-month\s*\{\s*margin-inline:\s*calc\(var\(--gap\) \* -1\);\s*border-inline-width:\s*0;/);  assert.match(rule(".calendar-bars"), /pointer-events:\s*none/, "막대는 칸 누르기를 막지 않는다");
   assert.match(rule(".calendar-day.is-weekend"), /background:\s*var\(--color-cal-weekend\)/);
   assert.match(rule(".calendar-day.is-outside"), /color:\s*var\(--color-text-muted\)/);
   assert.match(css, /\.calendar-day\.is-today > [^{]+\{[^}]*background:\s*var\(--color-school-blue\);[^}]*color:\s*var\(--color-on-accent\)/);
