@@ -273,8 +273,9 @@ test("online HTTP errors do not fall back to a stale shell file", async () => {
 });
 
 // app.js의 import 줄을 걷어 내고 모듈 함수를 스텁으로 넣어 부팅한다. 네트워크와 저장소는 쓰지 않는다.
-// 전송 아이콘 모듈은 동적 import다. 가짜 로더로 바꿔 끼워 성공·실패를 직접 정한다.
-const SEND_ICON_IMPORT = 'import("./send-icon.mjs")';
+// 전송 아이콘 모듈은 채팅을 그리기 전에 기다리는 동적 import다. vm 스크립트는 top-level await를 못 쓰므로
+// 기다린 결과(모듈 또는 실패 시 null)를 돌려주는 가짜 로더로 그 식을 바꿔 끼운다.
+const SEND_ICON_IMPORT = 'await import("./send-icon.mjs").catch(() => null)';
 function bootApp(startRoute, storage = null, { tabBar = null, tabs = [], loadSendIcon = null } = {}) {
   const calls = { refresh: 0, calendarRefresh: 0, moves: [], students: 0, login: [], diagnosis: [], handwritingClose: 0, quickActionsClose: 0 };
   const roots = new Map();
@@ -296,7 +297,7 @@ function bootApp(startRoute, storage = null, { tabBar = null, tabs = [], loadSen
   const source = read("web/assets/app.js").toString();
   assert.equal(source.split(SEND_ICON_IMPORT).length, 2, "send-icon.mjs dynamic import appears once");
   vm.runInNewContext(source.replace(/^import .*;\r?\n/gm, "").replace(SEND_ICON_IMPORT, "loadSendIconModule()"), {
-    loadSendIconModule: loadSendIcon ?? (async () => ({
+    loadSendIconModule: loadSendIcon ?? (() => ({
       mountSendIcon(button, opts) {
         calls.sendIcon = { button, opts };
         return { setStopping() {} };
@@ -453,47 +454,62 @@ test("leaving the AIO tab closes the handwriting pad", () => {
   assert.equal(calls.handwritingClose, 1);
 });
 
-const settle = () => new Promise((resolve) => setImmediate(resolve));
-
-test("chat receives a send icon factory that mounts the morph icon once the module loads", async () => {
-  const states = [];
-  let release;
-  const module = new Promise((resolve) => { release = resolve; });
+test("a loaded send icon module gives chat a factory that mounts the icon synchronously", () => {
   const mounted = [];
-  const { options, doc } = bootApp("aio", null, { loadSendIcon: () => module });
-  assert.equal(typeof options.chat.sendIcon, "function");
-  const button = { id: "virtual-send" };
-  const icon = options.chat.sendIcon(button);
-  // 모듈이 오기 전에 응답이 시작돼도 버튼 상태를 잃지 않는다.
-  icon.setStopping(true);
-  release({
+  const controller = { setStopping() {} };
+  const { options, doc } = bootApp("aio", null, { loadSendIcon: () => ({
     mountSendIcon(target, opts) {
       mounted.push({ target, opts });
-      return { setStopping: (on) => states.push(on) };
+      return controller;
     },
-  });
-  await settle();
+  }) });
+  assert.equal(typeof options.chat.sendIcon, "function");
+  assert.equal(mounted.length, 0, "the icon mounts only when chat-view calls the factory");
+  const button = { id: "virtual-send" };
+  // chat-view가 버튼을 만들 때 부르는 그 자리에서 아이콘이 붙고 같은 제어 객체가 돌아온다.
+  assert.equal(options.chat.sendIcon(button), controller);
   assert.equal(mounted.length, 1);
   assert.equal(mounted[0].target, button);
   assert.equal(mounted[0].opts.doc, doc);
   assert.equal(typeof mounted[0].opts.win, "object");
-  assert.deepEqual(states, [true], "pending stop state is applied after mounting");
-  icon.setStopping(false);
-  assert.deepEqual(states, [true, false]);
 });
 
-test("an uncached send icon module under the previous worker leaves a working text button", async () => {
-  // v11 워커는 새 app.js를 저장하지만 send-icon.mjs는 모른다. 오프라인에서 그 import가 실패해도 앱은 시작한다.
-  const { options, calls } = bootApp("aio", null,
-    { loadSendIcon: () => Promise.reject(new TypeError("offline: send-icon.mjs not cached")) });
-  const icon = options.chat.sendIcon({ id: "virtual-send" });
-  icon.setStopping(true);
-  await settle();
-  icon.setStopping(false);
-  assert.equal(calls.sendIcon, undefined);
-  assert.equal(typeof options.onRoute, "function", "the router still started");
+test("an uncached send icon module under the previous worker passes no sendIcon so chat keeps text labels", () => {
+  // v11 워커는 새 app.js를 저장하지만 send-icon.mjs는 모른다. 오프라인에서 그 import가 실패하면(null)
+  // 팩터리를 넘기지 않는다. 넘기면 chat-view는 아이콘이 있다고 보고 "보내기"↔"중단" 글자 갱신을 건너뛴다.
+  for (const loaded of [null, {}, { mountSendIcon: "x" }]) {
+    const { options, calls } = bootApp("aio", null, { loadSendIcon: () => loaded });
+    assert.ok("chat" in options, "chat still mounts");
+    assert.equal(options.chat.sendIcon, undefined, JSON.stringify(loaded));
+    assert.equal(calls.sendIcon, undefined);
+    assert.equal(typeof options.onRoute, "function", "the router still started");
+  }
   const source = read("web/assets/app.js").toString();
   assert.doesNotMatch(source, /^import[^;]*["']\.\/send-icon\.mjs["']/m, "no static import of a module the old worker cannot serve");
+  assert.ok(source.indexOf(SEND_ICON_IMPORT) < source.indexOf("mountChat("), "the import settles before chat mounts");
+});
+
+test("service worker registration still runs when load already fired during the send icon await", () => {
+  const source = read("web/assets/app.js").toString();
+  const run = (readyState) => {
+    const registered = [];
+    const listeners = [];
+    const context = {
+      navigator: { serviceWorker: { register: (url) => { registered.push(url); return Promise.resolve(); } } },
+      document: { readyState },
+      window: { addEventListener: (name, listener, opts) => listeners.push({ name, listener, opts }) },
+    };
+    const block = source.slice(source.indexOf("function registerServiceWorker"));
+    vm.runInNewContext(block, context);
+    return { registered, listeners };
+  };
+  assert.deepEqual(run("complete").registered, ["./sw.js"]);
+  const pending = run("interactive");
+  assert.deepEqual(pending.registered, []);
+  assert.equal(pending.listeners.length, 1);
+  assert.equal(pending.listeners[0].name, "load");
+  pending.listeners[0].listener();
+  assert.deepEqual(pending.registered, ["./sw.js"]);
 });
 
 test("leaving the AIO tab closes quick actions", () => {

@@ -33,29 +33,13 @@ const prefs = createPrefStorage(storage);
 const homeRoot = document.getElementById("home-root");
 
 // 전송 화살표 ↔ 정지 ■ 모핑은 동적 import로 불러온다. 이전 셸 캐시(v11)의 워커가 아직 제어하는 동안에는
-// 새 app.js만 저장되고 send-icon.mjs는 저장되지 않는다. 정적 import면 오프라인에서 앱 전체가 시작되지 않으므로,
-// 모듈을 못 불러오면 버튼은 글자("보내기"↔"중단")로 남는다.
-const sendIconModule = import("./send-icon.mjs").catch(() => null);
-
-// chat-view는 버튼을 만들 때 한 번 부르고 응답 중에는 setStopping만 부른다.
-// 모듈이 오기 전의 상태는 기억했다가 아이콘을 붙일 때 맞춘다.
-function sendIcon(button) {
-  let icon = null;
-  let stopping = false;
-  sendIconModule.then((module) => {
-    if (!module) return;
-    icon = module.mountSendIcon(button, { doc: document, win: window });
-    if (stopping) icon.setStopping(true);
-  }).catch(() => {
-    icon = null; // 아이콘을 붙이지 못하면 글자 버튼으로 남는다
-  });
-  return {
-    setStopping(on) {
-      stopping = Boolean(on);
-      icon?.setStopping(stopping);
-    },
-  };
-}
+// 새 app.js만 저장되고 send-icon.mjs는 저장되지 않는다. 정적 import면 오프라인에서 앱 전체가 시작되지 않는다.
+// 채팅을 그리기 전에 결과를 기다린다. 못 불러오면 sendIcon을 넘기지 않아 chat-view가 글자("보내기"↔"중단")를 바꾼다.
+// 팩터리를 먼저 넘기고 나중에 실패하면 chat-view는 아이콘이 있다고 보고 글자 갱신을 건너뛴다.
+const sendIconModule = await import("./send-icon.mjs").catch(() => null);
+const sendIcon = typeof sendIconModule?.mountSendIcon === "function"
+  ? (button) => sendIconModule.mountSendIcon(button, { doc: document, win: window })
+  : undefined;
 
 const handwriting = createHandwritingPad({
   doc: document,
@@ -169,10 +153,14 @@ home = mountHome({
 
 router.start();
 
-if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => {
-    navigator.serviceWorker.register("./sw.js").catch(() => {
-      // 등록 실패해도 앱은 온라인으로 계속 동작한다.
-    });
+function registerServiceWorker() {
+  navigator.serviceWorker.register("./sw.js").catch(() => {
+    // 등록 실패해도 앱은 온라인으로 계속 동작한다.
   });
+}
+
+if ("serviceWorker" in navigator) {
+  // 위의 await 동안 load가 이미 지났을 수 있다. 그때는 바로 등록한다.
+  if (document.readyState === "complete") registerServiceWorker();
+  else window.addEventListener("load", registerServiceWorker, { once: true });
 }
