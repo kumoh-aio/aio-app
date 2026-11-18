@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://kumoh-campus.onrender.com; base-uri 'self'; form-action 'self'; object-src 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0A2540">
+  <meta name="description" content="금오공대 학사 행정 AI 아이오(AIO)">
+  <title>아이오 · 금오공대 학사 행정</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" href="assets/icons/icon-192.png">
+  <link rel="apple-touch-icon" href="assets/icons/icon-192.png">
+  <link rel="stylesheet" href="assets/app.css">
+  <script type="module" src="assets/app.js"></script>
+</head>
+<body>
+  <header class="app-header">
+    <p class="app-title"><span class="app-name">아이오</span> <span class="app-sub">금오공대 학사 행정</span></p>
+  </header>
+
+  <main id="main" class="app-main">
+    <section class="view" data-view="home" aria-labelledby="title-home">
+      <h1 id="title-home" class="view-title" tabindex="-1">무엇이 궁금하세요?</h1>
+      <div id="home-root" class="home"></div>
+    </section>
+
+    <section class="view" data-view="aio" aria-labelledby="title-aio" hidden>
+      <h1 id="title-aio" class="view-title" tabindex="-1">아이오</h1>
+      <div class="card empty-state"><p>아이오와 나눈 대화가 여기에 표시돼요.</p></div>
+    </section>
+
+    <section class="view" data-view="graduation" aria-labelledby="title-graduation" hidden>
+      <h1 id="title-graduation" class="view-title" tabindex="-1">졸업 요건</h1>
+      <div class="card empty-state"><p>시연 계정으로 졸업 요건 진단을 볼 수 있게 준비하고 있어요.</p></div>
+    </section>
+
+    <section class="view" data-view="calendar" aria-labelledby="title-calendar" hidden>
+      <h1 id="title-calendar" class="view-title" tabindex="-1">학사일정</h1>
+      <div class="card empty-state"><p>학사일정을 준비하고 있어요.</p></div>
+    </section>
+
+    <section class="view" data-view="more" aria-labelledby="title-more" hidden>
+      <h1 id="title-more" class="view-title" tabindex="-1">더보기</h1>
+      <div class="card empty-state"><p>설정과 앱 정보가 여기에 들어갈 예정이에요.</p></div>
+    </section>
+  </main>
+
+  <nav class="tab-bar" aria-label="주 메뉴">
+    <a class="tab" href="#/home" data-tab="home">홈</a>
+    <a class="tab" href="#/aio" data-tab="aio">아이오</a>
+    <a class="tab" href="#/graduation" data-tab="graduation">졸업</a>
+    <a class="tab" href="#/calendar" data-tab="calendar">일정</a>
+    <a class="tab" href="#/more" data-tab="more">더보기</a>
+  </nav>
+</body>
+</html>
