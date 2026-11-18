@@ -556,10 +556,9 @@ function integratedQuickActions(t) {
   return null;
 }
 
-// 아래 두 검사는 동작 작업의 파일(quick-actions.mjs·sw.js)이 이 스타일과 맞물리는지 결합 체크아웃에서 본다.
-// #29(a53cbeb)가 먼저 배포한 셸 캐시 판. 링 스타일을 담은 결합본은 이보다 새 판이어야 설치된 PWA가 새 워커를 받는다.
-const DEPLOYED_SHELL_VERSION = 11;
-
+// 동작 작업의 배치 모듈(quick-actions.mjs)이 이 스타일의 라벨 자리 계약을 지키는지 결합 체크아웃에서 본다.
+// 셸 캐시 판은 동작 작업의 sw.js와 pwa 테스트가 맡는다. 두 PR은 연달아 병합되고 그 사이 배포가 없으므로,
+// 이 파일에서 특정 PR의 캐시 판 번호를 기준으로 삼지 않는다.
 test("통합 빠른 실행 링: 배치 함수가 라벨 자리를 .qa-item에 넘긴다", (t) => {
   const source = integratedQuickActions(t);
   if (source === null) return;
@@ -569,17 +568,6 @@ test("통합 빠른 실행 링: 배치 함수가 라벨 자리를 .qa-item에 �
   for (const name of ["--qa-label-x", "--qa-label-y"]) {
     assert.match(source, new RegExp(`["'\`]${name}["'\`]`), `${name}를 넘긴다`);
   }
-});
-
-test("통합 빠른 실행 링: 링 스타일을 담은 셸은 #29가 먼저 배포한 v11보다 새 캐시 판이다", (t) => {
-  const source = integratedQuickActions(t);
-  if (source === null) return;
-  // 워커 파일이 #29와 같은 판이면 브라우저가 새 워커를 설치하지 않고, 기존 캐시의 index.html·app.css를 계속 내준다.
-  const worker = readFileSync(new URL("../web/sw.js", import.meta.url), "utf8");
-  const version = Number(worker.match(/CACHE_NAME\s*=\s*`\$\{CACHE_PREFIX\}v(\d+)`/)?.[1]);
-  assert.ok(Number.isInteger(version), "CACHE_NAME에서 판 번호를 읽는다");
-  assert.ok(version > DEPLOYED_SHELL_VERSION,
-    `셸 캐시 판 v${version}: #29가 배포한 v${DEPLOYED_SHELL_VERSION}보다 커야 설치된 PWA가 새 HTML·CSS를 받는다`);
 });
 
 test("빠른 실행 링: 전환은 300ms 미만 ease-out이고 움직임 줄이기에서 꺼진다", () => {
