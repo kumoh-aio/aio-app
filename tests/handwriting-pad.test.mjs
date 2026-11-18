@@ -268,6 +268,24 @@ test("합쳐진 포인터 이벤트를 그리고 크기 변경 뒤에도 획을 
   assert.ok(f.doc.canvases[1].width >= 200);
 });
 
+test("600×240에서 240×600으로 바꾼 뒤 그린 정사각 획은 PNG에서도 정사각형이다", async () => {
+  const f = fixture();
+  f.canvas.getBoundingClientRect = () => ({ left: 0, top: 0, width: 240, height: 600 });
+  f.doc.resize();
+  f.canvas.dispatch("pointerdown", { clientX: 20, clientY: 20 });
+  f.canvas.dispatch("pointermove", { clientX: 120, clientY: 20 });
+  f.canvas.dispatch("pointermove", { clientX: 120, clientY: 120 });
+  f.canvas.dispatch("pointermove", { clientX: 20, clientY: 120 });
+  f.canvas.dispatch("pointerup", { clientX: 20, clientY: 20 });
+  f.action("insert").click();
+  await tick();
+  const png = f.doc.canvases[1];
+  assert.equal(png.width, png.height);
+  assert.ok(png.width > 100, "획 굵기와 여백도 포함한다");
+  assert.equal(f.canvas.width, 480);
+  assert.equal(f.canvas.height, 1200);
+});
+
 test("세 언어 상태와 고정 오류 문구를 제공한다", async () => {
   for (const lang of ["ko", "en", "zh"]) {
     const f = fixture(async () => { throw Object.assign(new Error("서버 원문"), { status: 422 }); });

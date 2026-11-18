@@ -123,8 +123,8 @@ export function createHandwritingPad({ doc, recognize }) {
       dialog.style.setProperty("--handwriting-left", `${left}px`);
     }
     const rect = canvas.getBoundingClientRect();
-    logicalWidth = Math.max(logicalWidth, rect.width);
-    logicalHeight = Math.max(logicalHeight, rect.height);
+    logicalWidth = rect.width;
+    logicalHeight = rect.height;
     dpr = win.devicePixelRatio || 1;
     canvas.width = Math.max(1, Math.round(logicalWidth * dpr));
     canvas.height = Math.max(1, Math.round(logicalHeight * dpr));
@@ -180,8 +180,13 @@ export function createHandwritingPad({ doc, recognize }) {
   function addPoints(event) {
     const events = event.getCoalescedEvents?.() || [];
     const samples = events.length ? [...events, event] : [event];
+    const rect = canvas.getBoundingClientRect();
+    const size = { width: rect.width, height: rect.height };
     for (const sample of samples) {
-      active.points.push({ ...toLogicalPoint(sample, canvas.getBoundingClientRect(), { width: canvas.width, height: canvas.height, dpr }), width: pressureWidth(sample.pressure, active.pointerType) });
+      active.points.push({
+        ...toLogicalPoint(sample, rect, size),
+        width: pressureWidth(sample.pressure, active.pointerType),
+      });
     }
     redraw();
   }
