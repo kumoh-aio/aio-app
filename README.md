@@ -24,8 +24,9 @@
 ## 개발 방식
 
 - 화면은 의존성 없는 HTML·CSS·JavaScript 모듈로 만든다. 서버 저장소의 `api/app/chat_web`과 같은 방식이라 같은 도구로 검사한다.
-- 테스트: 저장소 루트에서 `node --test tests/*.test.mjs`
-- 로컬 미리보기: `python -m http.server 5173 --directory web` 후 http://127.0.0.1:5173
+- 테스트: 저장소 루트에서 `node --test tests/home.test.mjs tests/router.test.mjs tests/api.test.mjs tests/pwa.test.mjs`
+- 아이콘: PNG는 저장소에 넣지 않는다. 미리보기·배포 전에 `node tools/make-icons.mjs`로 `web/assets/icons/`에 만든다(테스트는 자동으로 만든다).
+- 로컬 미리보기: `node tools/make-icons.mjs` 다음 `python -m http.server 5173 --directory web` 후 http://127.0.0.1:5173
 - 안드로이드 포장(Capacitor)과 APK 빌드는 GitHub Actions에서만 `npm`을 쓴다. 로컬 PC에는 안드로이드 SDK가 필요 없다.
 
 ## 문서
