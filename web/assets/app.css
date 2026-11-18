@@ -17,6 +17,17 @@
   --color-success: #0F7A43;
   --color-warn: #9A5B00;
   --color-error: #C62F2F;
+  --color-cal-weekend: #F2F6FA;
+  --color-cal-enroll-bg: #E3F0FB;
+  --color-cal-enroll-ink: #0B4F8A;
+  --color-cal-exam-bg: #FFE9E2;
+  --color-cal-exam-ink: #9A3412;
+  --color-cal-holiday-bg: #FDE4E4;
+  --color-cal-holiday-ink: #A11D1D;
+  --color-cal-register-bg: #FFF4C2;
+  --color-cal-register-ink: #6B4E00;
+  --color-cal-other-bg: #EEF2F6;
+  --color-cal-other-ink: #3A4B60;
 
   --surface-card: var(--color-raised);
   --surface-input: var(--color-surface);
@@ -58,6 +69,17 @@
   --color-warn: #FBBF24;
   --color-error: #F87171;
   --color-border: #35475F;
+  --color-cal-weekend: #1F3350;
+  --color-cal-enroll-bg: #12345A;
+  --color-cal-enroll-ink: #A8D4FF;
+  --color-cal-exam-bg: #4A2419;
+  --color-cal-exam-ink: #FFC2AF;
+  --color-cal-holiday-bg: #4A1C1F;
+  --color-cal-holiday-ink: #FFB4B4;
+  --color-cal-register-bg: #3D3310;
+  --color-cal-register-ink: #FFE07A;
+  --color-cal-other-bg: #24364F;
+  --color-cal-other-ink: #D3DEEA;
   --shadow-card: 0 1px 3px rgba(0, 0, 0, .24);
   --shadow-raised: 6px 6px 14px rgba(0,0,0,.45), -6px -6px 14px rgba(255,255,255,.05);
   --shadow-recessed: inset 3px 3px 8px rgba(0,0,0,.5), inset -3px -3px 8px rgba(120,160,210,.08);
@@ -79,6 +101,17 @@
     --color-warn: #FBBF24;
     --color-error: #F87171;
     --color-border: #35475F;
+    --color-cal-weekend: #1F3350;
+    --color-cal-enroll-bg: #12345A;
+    --color-cal-enroll-ink: #A8D4FF;
+    --color-cal-exam-bg: #4A2419;
+    --color-cal-exam-ink: #FFC2AF;
+    --color-cal-holiday-bg: #4A1C1F;
+    --color-cal-holiday-ink: #FFB4B4;
+    --color-cal-register-bg: #3D3310;
+    --color-cal-register-ink: #FFE07A;
+    --color-cal-other-bg: #24364F;
+    --color-cal-other-ink: #D3DEEA;
     --shadow-card: 0 1px 3px rgba(0, 0, 0, .24);
     --shadow-raised: 6px 6px 14px rgba(0,0,0,.45), -6px -6px 14px rgba(255,255,255,.05);
     --shadow-recessed: inset 3px 3px 8px rgba(0,0,0,.5), inset -3px -3px 8px rgba(120,160,210,.08);
@@ -1014,6 +1047,255 @@ a {
   min-height: var(--touch);
 }
 
+/* 월 달력. 구조선은 본문색 9% 헤어라인이고 color-mix가 없으면 --color-border로 그린다. */
+.calendar-viewswitch {
+  display: inline-flex;
+}
+
+.calendar-viewswitch button,
+.calendar-nav button {
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0 14px;
+  background: var(--surface-input);
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color var(--transition), color var(--transition);
+}
+
+.calendar-viewswitch button:first-child:not(:last-child) {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.calendar-viewswitch button + button {
+  border-left-width: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.calendar-viewswitch button[aria-pressed="true"] {
+  background: var(--color-school-blue);
+  border-color: var(--color-school-blue);
+  color: var(--color-on-accent);
+  font-weight: 700;
+}
+
+.calendar-nav {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.calendar-month-title {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 18px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.calendar-month {
+  --calendar-line: var(--color-border);
+  --calendar-date-size: 28px;
+  --calendar-bar-height: 20px;
+  --calendar-bar-gap: 2px;
+  --calendar-bar-rows: 3;
+  display: grid;
+  margin: 0;
+  overflow-x: auto;
+  background: var(--surface-card);
+  border: 1px solid var(--calendar-line);
+}
+
+@supports (color: color-mix(in srgb, red 9%, transparent)) {
+  .calendar-month {
+    --calendar-line: color-mix(in srgb, var(--color-text) 9%, transparent);
+  }
+}
+
+/* 칸 너비가 44px 밑으로 내려가지 않게 열 최소값을 --touch로 둔다. */
+.calendar-week {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(var(--touch), 1fr));
+}
+
+.calendar-week + .calendar-week {
+  border-top: 1px solid var(--calendar-line);
+}
+
+.calendar-month [role="columnheader"] {
+  padding: 6px 0;
+  color: var(--color-text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+}
+
+.calendar-day {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  min-height: calc(var(--calendar-date-size) + 30px
+    + var(--calendar-bar-rows) * (var(--calendar-bar-height) + var(--calendar-bar-gap)));
+  padding: 4px;
+  color: var(--color-text);
+  cursor: pointer;
+  --focus-offset: -4px;
+  transition: background-color var(--transition);
+}
+
+.calendar-day + .calendar-day,
+.calendar-week > [role="columnheader"] + [role="columnheader"] {
+  border-left: 1px solid var(--calendar-line);
+}
+
+.calendar-day > :first-child:not(.calendar-dots, .calendar-more) {
+  display: inline-grid;
+  place-items: center;
+  min-width: var(--calendar-date-size);
+  height: var(--calendar-date-size);
+  padding: 0 4px;
+  border-radius: var(--radius-pill);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.calendar-day.is-weekend {
+  background: var(--color-cal-weekend);
+}
+
+.calendar-day.is-outside {
+  color: var(--color-text-muted);
+}
+
+.calendar-day.is-today > :first-child:not(.calendar-dots, .calendar-more) {
+  background: var(--color-school-blue);
+  color: var(--color-on-accent);
+  font-weight: 700;
+}
+
+.calendar-day.is-selected {
+  box-shadow: inset 0 0 0 2px var(--color-school-blue);
+}
+
+.calendar-more {
+  margin-top: auto;
+  padding: 0 4px;
+  background: none;
+  border: 0;
+  color: var(--color-text-muted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.calendar-bars {
+  position: absolute;
+  inset: calc(6px + var(--calendar-date-size)) 0 auto;
+  display: grid;
+  grid-template-columns: repeat(7, minmax(var(--touch), 1fr));
+  grid-auto-rows: var(--calendar-bar-height);
+  row-gap: var(--calendar-bar-gap);
+  pointer-events: none;
+}
+
+.calendar-cat-enroll { --cal-bg: var(--color-cal-enroll-bg); --cal-ink: var(--color-cal-enroll-ink); }
+.calendar-cat-exam { --cal-bg: var(--color-cal-exam-bg); --cal-ink: var(--color-cal-exam-ink); }
+.calendar-cat-holiday { --cal-bg: var(--color-cal-holiday-bg); --cal-ink: var(--color-cal-holiday-ink); }
+.calendar-cat-register { --cal-bg: var(--color-cal-register-bg); --cal-ink: var(--color-cal-register-ink); }
+.calendar-cat-other { --cal-bg: var(--color-cal-other-bg); --cal-ink: var(--color-cal-other-ink); }
+
+.calendar-bar {
+  min-width: 0;
+  margin: 0 3px;
+  padding: 0 6px;
+  overflow: hidden;
+  background: var(--cal-bg, var(--color-cal-other-bg));
+  /* 채움은 칸 배경과 거의 같은 밝기라, 기간 경계는 분류 글자색 외곽선(칸·주말 틴트 대비 3:1 이상)으로 그린다. */
+  border: 1px solid var(--cal-ink, var(--color-cal-other-ink));
+  border-radius: 6px;
+  color: var(--cal-ink, var(--color-cal-other-ink));
+  font-size: 12px;
+  font-weight: 600;
+  line-height: calc(var(--calendar-bar-height) - 2px);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.calendar-bar.is-continued-before {
+  margin-left: 0;
+  border-left-width: 0;
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.calendar-bar.is-continued-after {
+  margin-right: 0;
+  border-right-width: 0;
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.calendar-dots {
+  display: none;
+  align-self: stretch;
+  justify-content: center;
+  gap: 3px;
+}
+
+.calendar-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--cal-ink, var(--color-cal-other-ink));
+}
+
+.calendar-day-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.calendar-event[class*="calendar-cat-"] {
+  border-left-color: var(--cal-ink);
+}
+
+@media (max-width: 600px) {
+  .calendar-bars,
+  .calendar-more {
+    display: none;
+  }
+
+  .calendar-dots {
+    display: flex;
+  }
+
+  .calendar-day {
+    align-items: center;
+    min-height: calc(var(--touch) + 6px);
+    padding: 4px 0;
+  }
+}
+
+/* 320px 화면에서도 7열이 44px 이상이 되도록 본문 좌우 여백 밖까지 격자를 편다. */
+@media (max-width: 380px) {
+  .calendar-month {
+    margin-inline: calc(var(--gap) * -1);
+    border-inline-width: 0;
+  }
+}
+
 /* 더보기 · PWA 설치 안내. 조작 요소 없는 정적 카드이고 홈 구역의 간격·카드를 그대로 쓴다. */
 .more {
   display: grid;
@@ -1122,6 +1404,7 @@ html[data-theme="neumorphic"] :is(
   .chat-select,
   [data-demo-form] select,
   .calendar-controls select,
+  .calendar-viewswitch button[aria-pressed="true"],
   .mode-button[aria-pressed="true"],
   .appearance-option:has(input:checked)
 ) {

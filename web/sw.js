@@ -1,11 +1,11 @@
 const CACHE_PREFIX = "aio-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v8`;
+const CACHE_NAME = `${CACHE_PREFIX}v9`;
 const SHELL_FILES = [
   "./", "index.html", "manifest.webmanifest", "assets/app.css", "assets/app.js",
   "assets/home.mjs", "assets/router.mjs", "assets/config.mjs", "assets/api.mjs",
   "assets/chat-view.mjs", "assets/chat-client.mjs", "assets/chat-history.mjs",
   "assets/demo-login.mjs", "assets/graduation-view.mjs", "assets/calendar-view.mjs",
-  "assets/appearance.mjs",
+  "assets/calendar-grid.mjs", "assets/appearance.mjs",
   "assets/handwriting-pad.mjs", "assets/handwriting-geometry.mjs",
   "assets/icons/icon-192.png", "assets/icons/icon-512.png",
 ];

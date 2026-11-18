@@ -13,7 +13,7 @@ const files = ["./", "index.html", "manifest.webmanifest", "assets/app.css", "as
   "assets/home.mjs", "assets/router.mjs", "assets/config.mjs", "assets/api.mjs",
   "assets/chat-view.mjs", "assets/chat-client.mjs", "assets/chat-history.mjs",
   "assets/demo-login.mjs", "assets/graduation-view.mjs", "assets/calendar-view.mjs",
-  "assets/appearance.mjs",
+  "assets/calendar-grid.mjs", "assets/appearance.mjs",
   "assets/handwriting-pad.mjs", "assets/handwriting-geometry.mjs",
   ...generatedIcons.keys()];
 const requireFullShell = process.env.AIO_REQUIRE_FULL_SHELL === "1";
@@ -21,7 +21,7 @@ const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/ho
   "assets/chat-view.mjs"];
 const requireScreen = requireFullShell || screenFiles.some((file) => existsSync(new URL(file, webRoot)));
 // 작업 A(다른 브랜치)가 만드는 모듈. 이 체크아웃에 없을 때만 건너뛴다(AIO_REQUIRE_FULL_SHELL=1이면 필수).
-const taskAFiles = ["assets/chat-client.mjs", "assets/chat-history.mjs"];
+const taskAFiles = ["assets/chat-client.mjs", "assets/chat-history.mjs", "assets/calendar-grid.mjs"];
 // 작업 B의 진단 화면과 일정 모듈은 통합 브랜치에서 함께 검사한다.
 const taskBFiles = ["assets/graduation-view.mjs", "assets/calendar-view.mjs"];
 
@@ -62,7 +62,7 @@ function worker(scope = "https://example.invalid/app/") {
       clients: { claim: async () => { calls.claimed += 1; } } },
     caches: { open: async (name) => { calls.opened.push(name); return cache; },
       keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4",
-        "aio-shell-v5", "aio-shell-v6", "aio-shell-v7", "unrelated"],
+        "aio-shell-v5", "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
     fetch: async (request) => { calls.fetched.push(request); return "network"; },
   });
@@ -123,17 +123,17 @@ test("precache files exist or are generated icons", async () => {
   }
 });
 
-test("activate removes v7 and older app caches and keeps CACHE_NAME v8", async () => {
+test("activate removes v8 and older app caches and keeps CACHE_NAME v9", async () => {
   const { events, calls } = worker();
   let pending;
   events.install({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.opened, ["aio-shell-v8"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v9"]);
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
   assert.deepEqual(calls.deleted,
     ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4", "aio-shell-v5",
-      "aio-shell-v6", "aio-shell-v7"]);
+      "aio-shell-v6", "aio-shell-v7", "aio-shell-v8"]);
   assert.equal(calls.claimed, 1);
 });
 
