@@ -259,6 +259,8 @@ a {
 }
 
 .mode-group {
+  position: relative;
+  isolation: isolate;
   display: inline-flex;
   padding: 3px;
   background: var(--color-paper);
@@ -1405,7 +1407,7 @@ html[data-theme="neumorphic"] :is(
   [data-demo-form] select,
   .calendar-controls select,
   .calendar-viewswitch button[aria-pressed="true"],
-  .mode-button[aria-pressed="true"],
+  .mode-group:not([data-indicator]) .mode-button[aria-pressed="true"],
   .appearance-option:has(input:checked)
 ) {
   box-shadow: var(--shadow-recessed);
@@ -1539,6 +1541,98 @@ html[data-theme="neumorphic"] :is(
     padding: 16px 16px calc(16px + env(safe-area-inset-bottom, 0px));
     border-radius: var(--radius-card) var(--radius-card) 0 0;
   }
+}
+
+/* 선택 표시. 답변 모드 세그먼트(.mode-group)와 아래 탭(.tab-bar)이 컨테이너의 ::before 하나를 움직인다.
+   JS가 컨테이너에 --indicator-left·--indicator-right(안쪽 경계에서 표식 왼쪽·오른쪽 끝까지의 px, CSS left·right와
+   같은 뜻)와 data-indicator(instant | ready), data-indicator-dir(forward = 오른쪽으로, back = 왼쪽으로)를 넣는다.
+   data-indicator가 없으면 ::before를 만들지 않아 지금 모양 그대로다. instant는 전환 없이, ready는 전환으로 옮긴다.
+   가는 쪽 모서리는 바로, 반대쪽 모서리는 --indicator-lag 뒤에 출발해 표식이 늘어났다가 줄어든다.
+   전환 중에는 표식이 새로 고른 버튼 아래에 아직 없으므로, 표식은 면 색 채움과 2px 경계로 그리고
+   버튼 글자는 바탕(--color-paper)과 표식(--color-surface) 어느 쪽 위에서도 4.5:1인 색만 쓴다.
+   .tab-bar는 position: fixed라 이미 표식의 기준 상자다. relative로 덮으면 화면 아래 고정이 풀린다.
+   움직임 줄이기는 앞쪽 전역 규칙(*::before transition: none !important)이 끈다. */
+.mode-group,
+.tab-bar {
+  --indicator-duration: 200ms;
+  --indicator-lag: 60ms;
+  --indicator-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/* 감쇠비 0.8 스프링을 5~10% 간격으로 뽑은 값. 넘침은 1.5% 안이라 세그먼트 안쪽 여백 3px을 벗어나지 않는다. */
+@supports (transition-timing-function: linear(0, 1)) {
+  .mode-group,
+  .tab-bar {
+    --indicator-ease: linear(0, 0.096 5%, 0.291 10%, 0.498 15%, 0.676 20%, 0.81 25%, 0.903 30%, 0.961 35%,
+      0.993 40%, 1.009 45%, 1.015 50%, 1.015 55%, 1.012 60%, 1.006 70%, 1.002 80%, 1);
+  }
+}
+
+.mode-group[data-indicator]::before,
+.tab-bar[data-indicator]::before {
+  content: "";
+  position: absolute;
+  left: var(--indicator-left, 0px);
+  right: var(--indicator-right, 0px);
+  z-index: -1;
+  pointer-events: none;
+}
+
+.mode-group[data-indicator]::before {
+  top: 3px;
+  bottom: 3px;
+  background: var(--color-surface);
+  border: 2px solid var(--color-school-blue);
+  border-radius: var(--radius-pill);
+}
+
+.mode-group[data-indicator]:has(.mode-deep[aria-pressed="true"])::before {
+  border-color: var(--color-text);
+}
+
+.mode-group[data-indicator] .mode-button[aria-pressed="true"] {
+  background: transparent;
+  border-color: transparent;
+  color: var(--color-school-blue);
+}
+
+.mode-group[data-indicator] .mode-deep[aria-pressed="true"] {
+  color: var(--color-text);
+}
+
+.tab-bar[data-indicator]::before {
+  top: 0;
+  height: 3px;
+  background: var(--color-school-blue);
+}
+
+.tab-bar[data-indicator] .tab[aria-current="page"] {
+  border-top-color: transparent;
+}
+
+.mode-group[data-indicator="ready"]::before,
+.tab-bar[data-indicator="ready"]::before {
+  transition: left var(--indicator-duration) var(--indicator-ease),
+    right var(--indicator-duration) var(--indicator-ease),
+    border-color var(--indicator-duration) ease-out;
+}
+
+.mode-group[data-indicator="ready"][data-indicator-dir="forward"]::before,
+.tab-bar[data-indicator="ready"][data-indicator-dir="forward"]::before {
+  transition: left var(--indicator-duration) var(--indicator-ease) var(--indicator-lag),
+    right var(--indicator-duration) var(--indicator-ease),
+    border-color var(--indicator-duration) ease-out;
+}
+
+.mode-group[data-indicator="ready"][data-indicator-dir="back"]::before,
+.tab-bar[data-indicator="ready"][data-indicator-dir="back"]::before {
+  transition: left var(--indicator-duration) var(--indicator-ease),
+    right var(--indicator-duration) var(--indicator-ease) var(--indicator-lag),
+    border-color var(--indicator-duration) ease-out;
+}
+
+html[data-theme="neumorphic"] .mode-group[data-indicator]::before {
+  box-shadow: var(--shadow-recessed);
 }
 
 /* 아이오 빠른 실행 링. .qa-ring은 + 버튼과 떨어져 붙어도 되는 화면 고정 레이어다.

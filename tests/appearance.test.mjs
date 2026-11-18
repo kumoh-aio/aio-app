@@ -596,5 +596,173 @@ test("음각양각은 카드와 탭에 볼록한 그림자, 입력과 선택 상
   assert.match(effect, /--shadow-card:\s*var\(--shadow-raised\)/);
   assert.match(effect, /--shadow-input:\s*var\(--shadow-recessed\)/);
   assert.match(css, /html\[data-theme="neumorphic"\] \.tab-bar\s*\{\s*box-shadow:\s*var\(--shadow-raised\)/);
-  assert.match(css, /\.mode-button\[aria-pressed="true"\],\s*\.appearance-option:has\(input:checked\)\s*\)\s*\{\s*box-shadow:\s*var\(--shadow-recessed\)/);
+  // 선택 표시가 없는 세그먼트만 버튼에 오목한 그림자를 주고, 표시가 있으면 그림자는 표식(::before)이 맡는다.
+  assert.match(css, /\.mode-group:not\(\[data-indicator\]\) \.mode-button\[aria-pressed="true"\],\s*\.appearance-option:has\(input:checked\)\s*\)\s*\{\s*box-shadow:\s*var\(--shadow-recessed\)/);
+  assert.doesNotMatch(css, /[,(]\s*\.mode-button\[aria-pressed="true"\],/, "표식과 버튼에 그림자가 겹치지 않는다");
+  assert.match(css, /html\[data-theme="neumorphic"\] \.mode-group\[data-indicator\]::before\s*\{\s*box-shadow:\s*var\(--shadow-recessed\)/);
+});
+
+// ---- 답변 모드·아래 탭 선택 표시 ----
+
+// 선택자는 규칙 첫 줄에서 찾는다. ".tab-bar[data-indicator]::before {"는 묶음 규칙의 둘째 줄에도 있으므로
+// 앞 줄이 쉼표로 끝나는 자리는 건너뛴다.
+function indicatorCss() {
+  const css = read("assets/app.css").replace(/\r\n/g, "\n").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = (selector) => {
+    const needle = `\n${selector} {`;
+    let at = css.indexOf(needle);
+    while (at >= 0 && css.slice(0, at).trimEnd().endsWith(",")) at = css.indexOf(needle, at + 1);
+    assert.ok(at >= 0, selector);
+    return css.slice(at, css.indexOf("}", at));
+  };
+  return { css, rule };
+}
+
+const toMs = (value) => {
+  const [, n, unit] = value.trim().match(/^(\d+(?:\.\d+)?)(ms|s)$/) ?? [];
+  assert.ok(n, `시간 값: ${value}`);
+  return Number(n) * (unit === "s" ? 1000 : 1);
+};
+
+test("선택 표시: data-indicator가 없으면 ::before를 만들지 않아 지금 모양 그대로다", () => {
+  const { css, rule } = indicatorCss();
+  // 기본 규칙은 그대로 남는다.
+  assert.match(rule('.mode-button[aria-pressed="true"]'), /background:\s*var\(--color-school-blue\)/);
+  assert.match(rule('.mode-deep[aria-pressed="true"]'), /background:\s*var\(--color-yellow\)/);
+  assert.match(rule('.tab[aria-current="page"]'), /border-top-color:\s*var\(--color-school-blue\)/);
+  // 표식 content는 [data-indicator] 아래에서만 만든다.
+  for (const [, selector] of css.matchAll(/([^{}]*::before[^{}]*)\{[^{}]*content:/g)) {
+    if (!/mode-group|tab-bar/.test(selector)) continue;
+    for (const part of selector.split(",")) assert.match(part, /\[data-indicator\]::before/, part.trim());
+  }
+  const mark = rule(".mode-group[data-indicator]::before,\n.tab-bar[data-indicator]::before");
+  assert.match(mark, /content:\s*""/);
+  assert.match(mark, /position:\s*absolute/);
+  assert.match(mark, /left:\s*var\(--indicator-left, 0px\);\s*right:\s*var\(--indicator-right, 0px\);/);
+  assert.match(mark, /pointer-events:\s*none/);
+  assert.match(mark, /z-index:\s*-1/, "표식은 버튼 글자 아래에 그린다");
+  const group = rule(".mode-group");
+  assert.match(group, /position:\s*relative/);
+  assert.match(group, /isolation:\s*isolate/, "z-index -1 표식이 세그먼트 바탕 밑으로 빠지지 않는다");
+  // 아래 탭은 화면 고정이라 이미 기준 상자다. relative로 덮으면 고정이 풀린다.
+  assert.match(rule(".tab-bar"), /position:\s*fixed/);
+  assert.doesNotMatch(css, /\.tab-bar[^{}]*\{[^{}]*position:\s*relative/);
+  assert.match(rule(".tab-bar[data-indicator]::before"), /top:\s*0;\s*height:\s*3px;\s*background:\s*var\(--color-school-blue\)/);
+  assert.match(rule('.tab-bar[data-indicator] .tab[aria-current="page"]'), /border-top-color:\s*transparent/);
+  const pressed = rule('.mode-group[data-indicator] .mode-button[aria-pressed="true"]');
+  assert.match(pressed, /background:\s*transparent;\s*border-color:\s*transparent;/);
+  // 세그먼트 색은 :has로만 고르고 모드용 속성을 따로 두지 않는다.
+  assert.match(rule('.mode-group[data-indicator]:has(.mode-deep[aria-pressed="true"])::before'), /border-color:\s*var\(--color-text\)/);
+  assert.doesNotMatch(css, /data-indicator-mode|data-mode=/);
+  // 표식 규칙은 기존 변수만 쓴다.
+  const block = css.slice(css.indexOf(".mode-group,\n.tab-bar {"), css.indexOf(".qa-defs {"));
+  assert.doesNotMatch(block, /#[\da-f]{3,8}\b|rgba?\(|url\(|gradient|backdrop-filter/i);
+  // 글자 굵기가 바뀌면 버튼 폭이 달라져 잰 좌표와 어긋난다.
+  assert.doesNotMatch(block, /font-weight/);
+});
+
+test("선택 표시: 가는 쪽 모서리가 먼저 출발하고 지연과 시간의 합이 300ms 미만이다", () => {
+  const { css, rule } = indicatorCss();
+  const tokens = rule(".mode-group,\n.tab-bar");
+  const duration = toMs(tokens.match(/--indicator-duration:\s*([^;]+);/)[1]);
+  const lag = toMs(tokens.match(/--indicator-lag:\s*([^;]+);/)[1]);
+  assert.ok(lag > 0 && duration > 0 && lag + duration < 300, `${lag} + ${duration}ms`);
+  const ease = tokens.match(/--indicator-ease:\s*cubic-bezier\(([^)]+)\)/)?.[1].split(",").map(Number);
+  assert.ok(ease?.length === 4, "기본 곡선은 cubic-bezier");
+  assert.ok(ease[0] < ease[1] && ease[3] === 1, "처음이 빠른 ease-out");
+
+  const transitionOf = (selector) => Object.fromEntries(rule(selector).match(/transition:\s*([^;]+);/)[1]
+    .split(/,\s*(?![^()]*\))/).map((part) => part.trim().split(/\s+/)).map(([prop, ...rest]) => [prop, rest.join(" ")]));
+  const both = (suffix) => `.mode-group[data-indicator="ready"]${suffix}::before,\n.tab-bar[data-indicator="ready"]${suffix}::before`;
+  const lead = "var(--indicator-duration) var(--indicator-ease)";
+  const trail = `${lead} var(--indicator-lag)`;
+  assert.deepEqual(transitionOf(both("")), { left: lead, right: lead, "border-color": "var(--indicator-duration) ease-out" });
+  assert.deepEqual(transitionOf(both('[data-indicator-dir="forward"]')),
+    { left: trail, right: lead, "border-color": "var(--indicator-duration) ease-out" }, "오른쪽으로: 오른쪽 끝이 먼저");
+  assert.deepEqual(transitionOf(both('[data-indicator-dir="back"]')),
+    { left: lead, right: trail, "border-color": "var(--indicator-duration) ease-out" }, "왼쪽으로: 왼쪽 끝이 먼저");
+  // 전환은 ready에서만 건다. instant와 표시 없음은 바로 놓인다.
+  for (const [, selector] of css.matchAll(/([^{}]+)\{[^{}]*transition:[^{}]*--indicator/g)) {
+    for (const part of selector.split(",")) assert.match(part, /\[data-indicator="ready"\]/, part.trim());
+  }
+  // 사용자 지정 속성 대신 left·right를 전환하므로 @property 등록이 필요 없다.
+  assert.doesNotMatch(css, /@property/);
+});
+
+test("선택 표시: linear() 스프링은 @supports 안에서만 쓰고 넘침이 작다", () => {
+  const { css } = indicatorCss();
+  const supports = [...css.matchAll(/@supports \(transition-timing-function: linear\(0, 1\)\)\s*\{([\s\S]*?)\n\}/g)];
+  assert.equal(supports.length, 1);
+  const inside = supports[0][1];
+  assert.match(inside, /^\s*\.mode-group,\s*\.tab-bar\s*\{/);
+  const outside = css.replace(supports[0][0], "");
+  assert.doesNotMatch(outside, /linear\(/, "@supports 밖에는 linear()가 없다");
+  const points = inside.match(/--indicator-ease:\s*linear\(([^)]+)\)/)[1].split(",").map((part) => part.trim().split(/\s+/));
+  assert.deepEqual(points[0], ["0"]);
+  assert.deepEqual(points.at(-1), ["1"]);
+  const stops = points.slice(1, -1).map(([, at]) => Number.parseFloat(at));
+  assert.ok(stops.every((at, index) => at > 0 && at < 100 && (index === 0 || at > stops[index - 1])), "위치는 오름차순");
+  const values = points.map(([value]) => Number(value));
+  // 넘침 2% 이하: 가장 긴 이동(약 100px)에서도 세그먼트 안쪽 여백 3px 안이다.
+  assert.ok(Math.max(...values) > 1 && Math.max(...values) <= 1.02, `${Math.max(...values)}`);
+  assert.ok(Math.min(...values) >= 0);
+});
+
+test("선택 표시: 움직임 줄이기 전역 규칙이 ::before 전환을 끈다", () => {
+  const { css } = indicatorCss();
+  const reduced = css.match(/@media \(prefers-reduced-motion: reduce\)\s*\{\s*\*,\s*\*::before,\s*\*::after\s*\{([^}]*)\}/)?.[1] ?? "";
+  assert.match(reduced, /transition:\s*none !important/);
+});
+
+test("선택 표시: 안착과 전환 중 글자 4.5:1, 표식 경계 3:1을 라이트·다크·음각양각에서 지킨다", () => {
+  const { css, rule } = indicatorCss();
+  const value = (selector, prop) => rule(selector).match(new RegExp(`(?:^|[\\s;{])${prop}:\\s*([^;]+);`))?.[1].trim();
+  const groupBack = value(".mode-group", "background");
+  const fill = value(".mode-group[data-indicator]::before", "background");
+  const fastEdge = value(".mode-group[data-indicator]::before", "border").replace(/^2px solid\s+/, "");
+  const deepEdge = value('.mode-group[data-indicator]:has(.mode-deep[aria-pressed="true"])::before', "border-color");
+  const fastInk = value('.mode-group[data-indicator] .mode-button[aria-pressed="true"]', "color");
+  const deepInk = value('.mode-group[data-indicator] .mode-deep[aria-pressed="true"]', "color");
+  const idleInk = value(".mode-button", "color");
+  const tabBack = value(".tab-bar", "background");
+  const tabLine = value(".tab-bar[data-indicator]::before", "background");
+  const tabInk = value('.tab[aria-current="page"]', "color");
+  const tabIdle = value(".tab", "color");
+  // 음각양각은 그림자만 바꾸고 색 토큰을 다시 정의하지 않으므로 라이트·다크 대비가 그대로 적용된다.
+  // (var(--color-*) 참조는 허용하고 --color-*: 선언만 막는다.)
+  const effect = css.match(/html\[data-theme="neumorphic"\]\s*\{([^{}]*)\}/)?.[1] ?? "";
+  assert.match(effect, /--shadow-input:/, "음각양각 블록을 찾았다");
+  assert.doesNotMatch(effect, /(?:^|[\s;{])--color-[\w-]+\s*:/);
+  for (const [mode, resolve] of palettes()) {
+    // 전환 중 표식은 새로 고른 버튼 아래에 아직 없고 떠나는 버튼 아래에 남는다. 그래서 모든 버튼 글자를 두 면 모두에서 본다.
+    for (const face of [groupBack, fill]) {
+      for (const ink of [fastInk, deepInk, idleInk]) assertContrast(resolve(ink), resolve(face), 4.5, `${mode} ${ink} on ${face}`);
+      for (const edge of [fastEdge, deepEdge]) assertContrast(resolve(edge), resolve(face), 3, `${mode} edge ${edge} on ${face}`);
+    }
+    assertContrast(resolve(tabLine), resolve(tabBack), 3, `${mode} tab line`);
+    for (const ink of [tabInk, tabIdle]) assertContrast(resolve(ink), resolve(tabBack), 4.5, `${mode} tab ${ink}`);
+    // 빠르게와 깊이 생각의 경계색은 서로 달라야 모드가 구분된다.
+    assert.notEqual(resolve(fastEdge), resolve(deepEdge), `${mode} 모드 경계색`);
+  }
+});
+
+test("선택 표시: 설계 문서에 웹 화면이 맞출 시간·곡선·토큰과 와이어프레임을 적는다", () => {
+  const design = readFileSync(new URL("../docs/DESIGN.md", import.meta.url), "utf8").replace(/\r\n/g, "\n");
+  const at = design.indexOf("## 답변 모드·아래 탭 선택 표시");
+  assert.ok(at >= 0, "설계 절");
+  const next = design.indexOf("\n## ", at + 1);
+  const section = design.slice(at, next === -1 ? undefined : next);
+  const { rule, css } = indicatorCss();
+  const tokens = rule(".mode-group,\n.tab-bar");
+  for (const name of ["duration", "lag"]) {
+    const declared = tokens.match(new RegExp(`--indicator-${name}:\\s*([^;]+);`))[1].trim();
+    assert.ok(section.includes(`\`--indicator-${name}: ${declared}\``), `${name} ${declared}`);
+  }
+  assert.ok(section.includes(tokens.match(/--indicator-ease:\s*([^;]+);/)[1].trim()), "기본 곡선");
+  const spring = css.match(/--indicator-ease:\s*(linear\([^)]+\))/)[1].replace(/\s+/g, " ");
+  assert.ok(section.replace(/\s+/g, " ").includes(spring), "스프링 점");
+  for (const word of ["data-indicator", "data-indicator-dir", "--indicator-left", "--indicator-right", "instant", "ready", "forward", "back"]) {
+    assert.ok(section.includes(word), word);
+  }
+  assert.match(section, /```text[\s\S]*빠르게[\s\S]*깊이 생각[\s\S]*```/, "와이어프레임");
 });
