@@ -12,7 +12,6 @@ import { mountCalendar } from "./calendar-view.mjs";
 import { mountAppearance } from "./appearance.mjs";
 import { createHandwritingPad } from "./handwriting-pad.mjs";
 import { createSelectionIndicator } from "./selection-indicator.mjs";
-import { mountSendIcon } from "./send-icon.mjs";
 
 const fetchImpl = globalThis.fetch.bind(globalThis);
 const api = createApi({ base: API_BASE, fetchImpl });
@@ -32,6 +31,32 @@ mountAppearance({ doc: document, storage });
 // 대화 기록은 용량 오류를 직접 다뤄야 하므로 원래 저장소를 그대로 쓴다.
 const prefs = createPrefStorage(storage);
 const homeRoot = document.getElementById("home-root");
+
+// 전송 화살표 ↔ 정지 ■ 모핑은 동적 import로 불러온다. 이전 셸 캐시(v11)의 워커가 아직 제어하는 동안에는
+// 새 app.js만 저장되고 send-icon.mjs는 저장되지 않는다. 정적 import면 오프라인에서 앱 전체가 시작되지 않으므로,
+// 모듈을 못 불러오면 버튼은 글자("보내기"↔"중단")로 남는다.
+const sendIconModule = import("./send-icon.mjs").catch(() => null);
+
+// chat-view는 버튼을 만들 때 한 번 부르고 응답 중에는 setStopping만 부른다.
+// 모듈이 오기 전의 상태는 기억했다가 아이콘을 붙일 때 맞춘다.
+function sendIcon(button) {
+  let icon = null;
+  let stopping = false;
+  sendIconModule.then((module) => {
+    if (!module) return;
+    icon = module.mountSendIcon(button, { doc: document, win: window });
+    if (stopping) icon.setStopping(true);
+  }).catch(() => {
+    icon = null; // 아이콘을 붙이지 못하면 글자 버튼으로 남는다
+  });
+  return {
+    setStopping(on) {
+      stopping = Boolean(on);
+      icon?.setStopping(stopping);
+    },
+  };
+}
+
 const handwriting = createHandwritingPad({
   doc: document,
   recognize: (request) => api.handwriting(request),
@@ -45,8 +70,7 @@ const chat = mountChat({
   send: (request) => chatClient.send(request),
   history: createChatHistory({ storage }),
   handwriting,
-  // 전송 화살표 ↔ 정지 ■ 모핑. chat-view는 버튼을 만들 때 한 번 부르고 응답 중에는 setStopping만 부른다.
-  sendIcon: (button) => mountSendIcon(button, { doc: document, win: window }),
+  sendIcon,
   quickActions: [
     { id: "calendar", label: { ko: "학사일정", en: "Calendar", zh: "校历" },
       run: () => router.navigate("calendar") },

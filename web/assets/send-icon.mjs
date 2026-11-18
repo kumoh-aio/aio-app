@@ -64,11 +64,23 @@ export function mountSendIcon(button, { doc = button.ownerDocument, win = doc?.d
     frame = null;
   }
 
+  const motion = win?.matchMedia?.("(prefers-reduced-motion: reduce)") ?? null;
+
   function instant() {
     return typeof win?.requestAnimationFrame !== "function"
       || Boolean(doc.hidden)
-      || Boolean(win.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches);
+      || Boolean(motion?.matches);
   }
+
+  // 움직이는 도중 문서가 숨거나 움직임 줄이기가 켜지면 남은 프레임을 버리고 목표 모양을 바로 그린다.
+  // 숨은 문서에서는 rAF가 멈추므로 다음 프레임을 기다리지 않고 이벤트에서 끝낸다.
+  function settle() {
+    if (frame === null || !instant()) return;
+    cancelFrame();
+    draw(copyPoints(target));
+  }
+  doc.addEventListener?.("visibilitychange", settle);
+  motion?.addEventListener?.("change", settle);
 
   function setStopping(on) {
     const next = on ? STOP_POINTS : SEND_POINTS;
@@ -85,7 +97,7 @@ export function mountSendIcon(button, { doc = button.ownerDocument, win = doc?.d
     const step = (now) => {
       frame = null;
       const t = Math.min(1, Math.max(0, ((Number.isFinite(now) ? now : clock()) - start) / DURATION_MS));
-      if (t >= 1) {
+      if (t >= 1 || instant()) {
         draw(copyPoints(next));
         return;
       }

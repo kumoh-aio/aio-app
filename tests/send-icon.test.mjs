@@ -30,9 +30,14 @@ function fakeWindow({ reduced = false, raf = true } = {}) {
   let nextId = 1;
   const queue = new Map();
   const cancelled = [];
+  const motionListeners = [];
+  const motion = {
+    matches: reduced,
+    addEventListener: (name, listener) => { if (name === "change") motionListeners.push(listener); },
+  };
   const win = {
     performance: { now: () => time },
-    matchMedia: (query) => ({ matches: reduced && query === "(prefers-reduced-motion: reduce)" }),
+    matchMedia: (query) => (query === "(prefers-reduced-motion: reduce)" ? motion : { matches: false }),
     cancelAnimationFrame: (id) => { cancelled.push(id); queue.delete(id); },
   };
   if (raf) {
@@ -47,6 +52,10 @@ function fakeWindow({ reduced = false, raf = true } = {}) {
     queue,
     cancelled,
     advance(ms) { time += ms; },
+    setReduced(on) {
+      motion.matches = on;
+      for (const listener of motionListeners) listener({ matches: on });
+    },
     run(ms = 0) {
       time += ms;
       const pending = [...queue];
@@ -58,9 +67,15 @@ function fakeWindow({ reduced = false, raf = true } = {}) {
 
 function mount(options = {}) {
   const frames = fakeWindow(options);
+  const docListeners = [];
   const doc = {
     hidden: Boolean(options.hidden),
     createElementNS: (namespace, tag) => new FakeNode(tag, namespace),
+    addEventListener: (name, listener) => { if (name === "visibilitychange") docListeners.push(listener); },
+  };
+  frames.hide = () => {
+    doc.hidden = true;
+    for (const listener of docListeners) listener({ type: "visibilitychange" });
   };
   const button = new FakeNode("button");
   const label = new FakeNode("span");
@@ -194,16 +209,51 @@ test("움직임 줄이기, rAF 없음, 숨은 문서에서는 프레임 없이 �
   }
 });
 
-test("움직이는 도중 문서가 숨으면 남은 프레임을 취소하고 목표 모양을 바로 그린다", () => {
-  const { icon, path, queue, cancelled, run, doc } = mount();
+test("목표를 유지한 채 문서가 숨으면 visibilitychange에서 프레임을 취소하고 정지 모양을 그린다", () => {
+  const { icon, path, queue, cancelled, run, hide } = mount();
+  icon.setStopping(true);
+  run(40);
+  assert.notEqual(path.getAttribute("d"), STOP_PATH, "아직 중간 모양");
+  const [pendingId] = queue.keys();
+  hide(); // setStopping을 다시 부르지 않는다
+  assert.deepEqual(cancelled, [pendingId]);
+  assert.equal(queue.size, 0, "예약 프레임이 남지 않는다");
+  assert.equal(path.getAttribute("d"), STOP_PATH);
+  // 숨은 뒤 방향이 바뀌어도 바로 바뀐다
+  icon.setStopping(false);
+  assert.equal(path.getAttribute("d"), SEND_PATH);
+  assert.equal(queue.size, 0);
+});
+
+test("움직이는 도중 움직임 줄이기가 켜지면 change에서 바로 목표 모양으로 끝낸다", () => {
+  const { icon, path, queue, cancelled, run, setReduced } = mount();
   icon.setStopping(true);
   run(40);
   const [pendingId] = queue.keys();
-  doc.hidden = true;
-  icon.setStopping(false);
+  setReduced(true);
   assert.deepEqual(cancelled, [pendingId]);
   assert.equal(queue.size, 0);
-  assert.equal(path.getAttribute("d"), SEND_PATH);
+  assert.equal(path.getAttribute("d"), STOP_PATH);
+  icon.setStopping(false);
+  assert.equal(path.getAttribute("d"), SEND_PATH, "켜진 뒤에는 처음부터 바로 바뀐다");
+  assert.equal(queue.size, 0);
+});
+
+test("change 이벤트를 놓쳐도 다음 프레임에서 움직임 줄이기를 다시 보고 목표 모양으로 끝낸다", () => {
+  const { icon, path, queue, run, win } = mount();
+  icon.setStopping(true);
+  run(40);
+  win.matchMedia("(prefers-reduced-motion: reduce)").matches = true; // 처리기는 부르지 않는다
+  run(16);
+  assert.equal(path.getAttribute("d"), STOP_PATH);
+  assert.equal(queue.size, 0, "더 프레임을 요청하지 않는다");
+});
+
+test("움직임이 없을 때의 숨김·움직임 줄이기 이벤트는 모양을 바꾸지 않는다", () => {
+  const { path, hide, setReduced } = mount();
+  hide();
+  setReduced(true);
+  assert.deepEqual(path.dHistory, [SEND_PATH]);
 });
 
 test("CSS: 전송 버튼은 44px 정사각이고 아이콘이 붙으면 글자를 시각적으로만 숨긴다", () => {

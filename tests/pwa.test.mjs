@@ -273,7 +273,9 @@ test("online HTTP errors do not fall back to a stale shell file", async () => {
 });
 
 // app.js의 import 줄을 걷어 내고 모듈 함수를 스텁으로 넣어 부팅한다. 네트워크와 저장소는 쓰지 않는다.
-function bootApp(startRoute, storage = null, { tabBar = null, tabs = [] } = {}) {
+// 전송 아이콘 모듈은 동적 import다. 가짜 로더로 바꿔 끼워 성공·실패를 직접 정한다.
+const SEND_ICON_IMPORT = 'import("./send-icon.mjs")';
+function bootApp(startRoute, storage = null, { tabBar = null, tabs = [], loadSendIcon = null } = {}) {
   const calls = { refresh: 0, calendarRefresh: 0, moves: [], students: 0, login: [], diagnosis: [], handwritingClose: 0, quickActionsClose: 0 };
   const roots = new Map();
   const doc = {
@@ -291,7 +293,15 @@ function bootApp(startRoute, storage = null, { tabBar = null, tabs = [] } = {}) 
   const options = {};
   const diagnosis = { show() {}, clear() {} };
   const fetchStub = async () => assert.fail("unexpected network request");
-  vm.runInNewContext(read("web/assets/app.js").toString().replace(/^import .*;\r?\n/gm, ""), {
+  const source = read("web/assets/app.js").toString();
+  assert.equal(source.split(SEND_ICON_IMPORT).length, 2, "send-icon.mjs dynamic import appears once");
+  vm.runInNewContext(source.replace(/^import .*;\r?\n/gm, "").replace(SEND_ICON_IMPORT, "loadSendIconModule()"), {
+    loadSendIconModule: loadSendIcon ?? (async () => ({
+      mountSendIcon(button, opts) {
+        calls.sendIcon = { button, opts };
+        return { setStopping() {} };
+      },
+    })),
     API_BASE: "https://example.invalid",
     fetch: fetchStub,
     document: doc,
@@ -309,10 +319,6 @@ function bootApp(startRoute, storage = null, { tabBar = null, tabs = [] } = {}) 
     createHandwritingPad(opts) {
       options.handwriting = opts;
       return { open() {}, close() { calls.handwritingClose += 1; } };
-    },
-    mountSendIcon(button, opts) {
-      calls.sendIcon = { button, opts };
-      return { setStopping() {} };
     },
     mountChat(opts) {
       options.chat = opts;
@@ -447,18 +453,47 @@ test("leaving the AIO tab closes the handwriting pad", () => {
   assert.equal(calls.handwritingClose, 1);
 });
 
-test("chat receives a send icon factory that mounts the morph icon on the given button", () => {
-  const { calls, options, doc } = bootApp("aio");
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("chat receives a send icon factory that mounts the morph icon once the module loads", async () => {
+  const states = [];
+  let release;
+  const module = new Promise((resolve) => { release = resolve; });
+  const mounted = [];
+  const { options, doc } = bootApp("aio", null, { loadSendIcon: () => module });
   assert.equal(typeof options.chat.sendIcon, "function");
-  assert.equal(calls.sendIcon, undefined, "the icon mounts only when chat-view calls the factory");
   const button = { id: "virtual-send" };
   const icon = options.chat.sendIcon(button);
-  assert.equal(calls.sendIcon.button, button);
-  assert.equal(calls.sendIcon.opts.doc, doc);
-  assert.equal(typeof calls.sendIcon.opts.win, "object");
-  assert.equal(typeof icon.setStopping, "function");
+  // 모듈이 오기 전에 응답이 시작돼도 버튼 상태를 잃지 않는다.
+  icon.setStopping(true);
+  release({
+    mountSendIcon(target, opts) {
+      mounted.push({ target, opts });
+      return { setStopping: (on) => states.push(on) };
+    },
+  });
+  await settle();
+  assert.equal(mounted.length, 1);
+  assert.equal(mounted[0].target, button);
+  assert.equal(mounted[0].opts.doc, doc);
+  assert.equal(typeof mounted[0].opts.win, "object");
+  assert.deepEqual(states, [true], "pending stop state is applied after mounting");
+  icon.setStopping(false);
+  assert.deepEqual(states, [true, false]);
+});
+
+test("an uncached send icon module under the previous worker leaves a working text button", async () => {
+  // v11 워커는 새 app.js를 저장하지만 send-icon.mjs는 모른다. 오프라인에서 그 import가 실패해도 앱은 시작한다.
+  const { options, calls } = bootApp("aio", null,
+    { loadSendIcon: () => Promise.reject(new TypeError("offline: send-icon.mjs not cached")) });
+  const icon = options.chat.sendIcon({ id: "virtual-send" });
+  icon.setStopping(true);
+  await settle();
+  icon.setStopping(false);
+  assert.equal(calls.sendIcon, undefined);
+  assert.equal(typeof options.onRoute, "function", "the router still started");
   const source = read("web/assets/app.js").toString();
-  assert.match(source, /import\s*\{\s*mountSendIcon\s*\}\s*from\s*"\.\/send-icon\.mjs"/);
+  assert.doesNotMatch(source, /^import[^;]*["']\.\/send-icon\.mjs["']/m, "no static import of a module the old worker cannot serve");
 });
 
 test("leaving the AIO tab closes quick actions", () => {
