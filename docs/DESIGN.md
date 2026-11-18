@@ -281,7 +281,9 @@ Google Stitch로 만든 시안을 기준으로 한다. 내보낸 원본(HTML·�
 | --- | --- | --- |
 | `--indicator-left`, `--indicator-right` | 컨테이너 | 안쪽 경계(padding 상자)에서 표식 왼쪽·오른쪽 끝까지의 px. CSS `left`·`right`와 같은 뜻 |
 | `data-indicator` | 컨테이너 | 없음이면 지금 모양 그대로. `instant`도 지금 모양 그대로이고 보이지 않는 표식만 좌표에 놓는다. `ready`면 기존 강조를 표식으로 옮기고 전환한다 |
-| `data-indicator-dir` | 컨테이너 | `forward`(오른쪽으로) 또는 `back`(왼쪽으로) |
+| `data-indicator-dir` | 컨테이너 | `forward`(오른쪽으로) 또는 `back`(왼쪽으로). 직전 목표가 아니라 지금 그려진 표식 위치에서 새 목표로 가는 방향이다 |
+
+- 전환 도중 다시 고르면 표식은 아직 직전 목표에 닿지 않았다. 직전 목표를 기준으로 방향을 정하면 실제 움직임과 반대가 될 수 있다. 그러면 앞 끝이 60ms 동안 멈춘 뒤 끝을 넘어 폭이 0이 된다. 방향은 그려진 위치(예: `getComputedStyle(컨테이너, "::before")`의 `left`·`right`)로 정한다. CSS는 안전망으로 표식에 `min-width: 24px`을 둬서, 교차하는 순간에도 표식이 사라지지 않게 한다. 안착 폭은 버튼 44px, 320px 화면의 탭 64px 이상이라 이 값은 안착 모양에 영향이 없다.
 
 - 표식은 컨테이너의 `::before` 하나다. `pointer-events: none`, `z-index: -1`이고 세그먼트는 `isolation: isolate`로 표식이 바탕 밑으로 빠지지 않게 한다.
 - `.mode-group`은 `position: relative`다. 아래 탭은 화면 아래 고정을 `<div class="tab-dock">` 래퍼가 맡고, 그 바로 아래 자식 `.tab-bar`가 `position: relative`로 표식의 기준 상자가 된다(`.tab-dock > .tab-bar`). 래퍼가 없는 마크업에서는 `.tab-bar`의 `position: fixed`가 남는다. fixed도 절대 위치 `::before`의 기준 상자(padding 상자)라 좌표 계약은 같다. 래퍼 없이 `.tab-bar`만 relative로 바꾸면 탭 막대가 본문 끝으로 밀려나므로 그렇게 하지 않는다.

@@ -1569,6 +1569,9 @@ html[data-theme="neumorphic"] :is(
    움직이는 2px 좌우 경계가 같은 색 글자 뒤를 지나가므로, ready 버튼 글자에는 표식 채움색 1px 테두리를 둘러
    획과 경계선 사이를 띄운다. 글자는 늘 채움색 위에 놓인 것과 같은 대비가 된다.
    .tab-bar는 position: fixed라 이미 표식의 기준 상자다. relative로 덮으면 화면 아래 고정이 풀린다.
+   전환 도중 다시 고를 때 방향이 실제 표식 위치와 어긋나면 앞 끝이 지연된 뒤 끝을 넘어 폭이 0이 될 수 있다.
+   min-width 24px은 그 순간에도 표식이 사라지지 않게 하는 안전망이다(안착 폭은 버튼 44px·탭 64px 이상이라 영향이 없다).
+   방향은 JS가 지금 그려진 표식 위치를 기준으로 정해야 한다.
    움직임 줄이기는 앞쪽 전역 규칙(*::before transition: none !important)이 끈다. */
 .mode-group,
 .tab-bar {
@@ -1592,6 +1595,7 @@ html[data-theme="neumorphic"] :is(
   position: absolute;
   left: var(--indicator-left, 0px);
   right: var(--indicator-right, 0px);
+  min-width: 24px;
   z-index: -1;
   pointer-events: none;
   opacity: 0;

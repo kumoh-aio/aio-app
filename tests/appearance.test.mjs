@@ -658,11 +658,9 @@ test("선택 표시: data-indicator가 없으면 ::before를 만들지 않아 �
       if (/\.tab-bar$/.test(part)) assert.equal(part, ".tab-dock > .tab-bar", "relative는 래퍼 안에서만 건다");
     }
   }
-  // 결합 체크아웃에서 래퍼를 쓰면 탭 막대가 래퍼의 바로 아래 자식이어야 relative 규칙이 걸린다.
-  const html = read("index.html");
-  if (html.includes("tab-dock")) {
-    assert.match(html, /<div class="tab-dock">\s*<nav class="tab-bar"[^>]*>[\s\S]*?<\/nav>\s*<\/div>/);
-  }
+  // 전환 도중 방향이 어긋나 두 끝이 교차해도 표식이 0폭으로 사라지지 않는다. 안착 폭(버튼 44px, 320px 화면 탭 64px)보다 작다.
+  const minWidth = Number(mark.match(/min-width:\s*(\d+)px/)?.[1]);
+  assert.ok(minWidth > 0 && minWidth < 44, `표식 최소 폭 ${minWidth}px`);
   assert.match(rule(".tab-bar[data-indicator]::before"), /top:\s*0;\s*height:\s*3px;\s*background:\s*var\(--color-school-blue\)/);
   assert.match(rule('.tab-bar[data-indicator="ready"] .tab[aria-current="page"]'), /border-top-color:\s*transparent/);
   const pressed = rule('.mode-group[data-indicator="ready"] .mode-button[aria-pressed="true"]');
@@ -689,6 +687,21 @@ test("선택 표시: data-indicator가 없으면 ::before를 만들지 않아 �
   assert.doesNotMatch(block, /#[\da-f]{3,8}\b|rgba?\(|url\(|gradient|backdrop-filter/i);
   // 글자 굵기가 바뀌면 버튼 폭이 달라져 잰 좌표와 어긋난다.
   assert.doesNotMatch(block, /font-weight/);
+});
+
+// 선택 표시 동작 모듈(selection-indicator.mjs)과 마크업은 상대 작업이 만든다. 결합 체크아웃(또는 통합 CI)에서는
+// 탭 막대가 .tab-dock 래퍼의 바로 아래 자식이어야 .tab-bar가 relative 기준 상자가 된다.
+test("통합 선택 표시: 아래 탭은 .tab-dock 안에 있어 .tab-bar가 relative가 된다", (t) => {
+  const integrated = process.env.AIO_REQUIRE_FULL_SHELL === "1"
+    || existsSync(new URL("../web/assets/selection-indicator.mjs", import.meta.url));
+  if (!integrated) {
+    t.skip("선택 표시 동작 모듈이 아직 이 체크아웃에 합쳐지지 않았음");
+    return;
+  }
+  const html = read("index.html");
+  assert.match(html, /<div class="tab-dock">\s*<nav class="tab-bar"[^>]*>[\s\S]*?<\/nav>\s*<\/div>/,
+    "nav.tab-bar를 div.tab-dock으로 감싼다(래퍼가 없으면 .tab-bar의 계산된 position은 fixed다)");
+  assert.equal((html.match(/class="tab-bar"/g) ?? []).length, 1);
 });
 
 test("선택 표시: 가는 쪽 모서리가 먼저 출발하고 지연과 시간의 합이 300ms 미만이다", () => {
