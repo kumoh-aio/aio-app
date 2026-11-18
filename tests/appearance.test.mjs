@@ -659,7 +659,8 @@ test("선택 표시: data-indicator가 없으면 ::before를 만들지 않아 �
     for (const part of selector.split(",").map((text) => text.trim())) {
       if (!/\.(?:mode-group|tab-bar)\[data-indicator/.test(part)) continue;
       // 표식 안쪽 버튼·탭을 바꾸는 규칙(기존 채움·글자색·위 선 덮어쓰기)은 ready에서만 건다.
-      if (/\s\.(?:mode-button|mode-deep|tab)(?![\w-])/.test(part)) {
+      // 버튼 자체 전환을 끄는 규칙은 instant에도 걸려야 하므로 예외다.
+      if (/\s\.(?:mode-button|mode-deep|tab)(?![\w-])/.test(part) && body.trim() !== "transition: none;") {
         assert.match(part, /\[data-indicator="ready"\]/, `instant에서 기존 강조를 바꾸지 않는다: ${part}`);
       }
       if (/opacity:\s*1/.test(body)) assert.match(part, /\[data-indicator="ready"\]/, `표식은 ready에서만 보인다: ${part}`);
@@ -742,6 +743,16 @@ test("선택 표시: 안착과 전환 중 글자 4.5:1, 표식 경계 3:1을 라
   const halo = value('.mode-group[data-indicator="ready"] .mode-button', "text-shadow")?.replace(/\s+/g, " ");
   assert.equal(halo, [["-1px", "0"], ["1px", "0"], ["0", "-1px"], ["0", "1px"]].map(([x, y]) => `${x} ${y} ${fill}`).join(", "),
     "네 방향 1px 테두리는 표식 채움색");
+  // 최종 색만 맞으면 부족하다. instant↔ready를 오갈 때 버튼 채움(강조색↔투명)과 글자색(on-accent↔강조색)이
+  // 섞이는 중간값은 어느 조합과도 대비가 맞지 않으므로, 표식이 붙은 세그먼트의 버튼은 전환 없이 한 번에 바뀐다.
+  assert.match(value(".mode-button", "transition") ?? "", /background-color/, "표시 없는 기존 모양은 그대로");
+  assert.equal(value(".mode-group[data-indicator] .mode-button", "transition"), "none");
+  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    if (!/transition:/.test(body) || /transition:\s*none/.test(body)) continue;
+    for (const part of selector.split(",").map((text) => text.trim())) {
+      assert.doesNotMatch(part, /\[data-indicator[^\]]*\][^,]*\s\.mode-(?:button|deep)/, `버튼 전환을 다시 켜지 않는다: ${part}`);
+    }
+  }
   const edgeWidth = Number(rule(".mode-group[data-indicator]::before").match(/border:\s*(\d+)px/)?.[1]);
   assert.ok(edgeWidth <= 2, `경계 ${edgeWidth}px`);
   const idleInk = value(".mode-button", "color");

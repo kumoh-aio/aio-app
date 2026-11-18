@@ -1594,6 +1594,12 @@ html[data-theme="neumorphic"] :is(
   border-color: var(--color-text);
 }
 
+/* instant와 ready를 오갈 때 버튼 채움(파랑↔투명)과 글자색(흰색↔파랑)이 150ms 동안 섞이면 중간 대비가 떨어진다.
+   표식이 붙은 세그먼트에서는 버튼 자체 전환을 끄고 두 상태를 한 번에 바꾼다. 움직임은 표식 하나가 맡는다. */
+.mode-group[data-indicator] .mode-button {
+  transition: none;
+}
+
 .mode-group[data-indicator="ready"] .mode-button {
   text-shadow: -1px 0 var(--color-surface), 1px 0 var(--color-surface),
     0 -1px var(--color-surface), 0 1px var(--color-surface);
