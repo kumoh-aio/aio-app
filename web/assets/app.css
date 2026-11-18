@@ -1,0 +1,378 @@
+/* 아이오 기본판. 색·면·그림자를 변수로 두어 뉴모피즘판은 [data-theme] 한 곳에서 덮어쓴다. */
+:root {
+  --color-navy: #0A2540;
+  --color-school-blue: #005B96;
+  --color-sky: #00A3D9;
+  --color-yellow: #FFD100;
+  --color-paper: #F5F9FC;
+  --color-surface: #FFFFFF;
+  --color-text: #0A2540;
+  --color-text-muted: #44566A;
+  --color-border: #D5E1EB;
+  --color-error: #B00020;
+
+  --surface-card: var(--color-surface);
+  --surface-input: var(--color-surface);
+  --shadow-card: 0 1px 3px rgba(10, 37, 64, 0.08), 0 4px 12px rgba(10, 37, 64, 0.06);
+  --shadow-input: none;
+  --border-card: 1px solid var(--color-border);
+
+  --radius-card: 16px;
+  --radius-control: 12px;
+  --radius-pill: 999px;
+  --touch: 44px;
+  --gap: 16px;
+  --tab-height: 60px;
+  --focus-ring: 0 0 0 3px var(--color-surface), 0 0 0 5px var(--color-school-blue);
+  --transition: 150ms ease;
+
+  --font-body: Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", "Noto Sans KR", system-ui, sans-serif;
+
+  color-scheme: light;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  background: var(--color-paper);
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.5;
+  word-break: keep-all;
+  overflow-wrap: anywhere;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+a {
+  color: var(--color-school-blue);
+}
+
+:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+/* 머리말 */
+.app-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: calc(env(safe-area-inset-top, 0px) + 12px) var(--gap) 12px;
+  background: var(--color-navy);
+  color: #FFFFFF;
+}
+
+.app-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.app-name {
+  color: var(--color-yellow);
+}
+
+.app-sub {
+  font-weight: 500;
+}
+
+/* 본문 */
+.app-main {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: var(--gap) var(--gap) calc(var(--tab-height) + env(safe-area-inset-bottom, 0px) + var(--gap));
+}
+
+.view-title {
+  margin: 4px 0 var(--gap);
+  font-size: 22px;
+  line-height: 1.3;
+}
+
+.view-title:focus {
+  outline: none;
+}
+
+.card {
+  background: var(--surface-card);
+  border: var(--border-card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.empty-state {
+  padding: 24px var(--gap);
+  color: var(--color-text-muted);
+  text-align: center;
+}
+
+.empty-state p {
+  margin: 0;
+}
+
+/* 질문 상자 */
+.ask-card {
+  display: grid;
+  gap: 10px;
+  padding: var(--gap);
+  border-top: 4px solid var(--color-sky);
+}
+
+.ask-label {
+  font-weight: 700;
+}
+
+.ask-input {
+  width: 100%;
+  min-height: 88px;
+  padding: 12px;
+  resize: vertical;
+  background: var(--surface-input);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-control);
+  box-shadow: var(--shadow-input);
+}
+
+.ask-input::placeholder {
+  color: var(--color-text-muted);
+}
+
+.ask-input[aria-invalid="true"] {
+  border-color: var(--color-error);
+}
+
+.field-error {
+  margin: 0;
+  color: var(--color-error);
+  font-size: 14px;
+}
+
+.ask-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.mode-group {
+  display: inline-flex;
+  padding: 3px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+}
+
+.mode-button {
+  min-height: var(--touch);
+  min-width: var(--touch);
+  padding: 0 14px;
+  background: transparent;
+  border: 0;
+  border-radius: var(--radius-pill);
+  color: var(--color-text-muted);
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color var(--transition), color var(--transition);
+}
+
+.mode-button[aria-pressed="true"] {
+  background: var(--color-navy);
+  color: #FFFFFF;
+}
+
+.mode-deep[aria-pressed="true"] {
+  background: var(--color-yellow);
+  color: var(--color-navy);
+}
+
+.button-primary,
+.button-secondary {
+  min-height: var(--touch);
+  padding: 0 20px;
+  border-radius: var(--radius-control);
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.button-primary {
+  background: var(--color-navy);
+  border: 0;
+  color: #FFFFFF;
+}
+
+.button-secondary {
+  background: var(--color-surface);
+  border: 1px solid var(--color-school-blue);
+  color: var(--color-school-blue);
+}
+
+/* 홈 구역 */
+.home {
+  display: grid;
+  gap: 24px;
+}
+
+.home-section {
+  display: grid;
+  gap: 10px;
+}
+
+.section-title {
+  margin: 0;
+  font-size: 18px;
+}
+
+.shortcut-grid,
+.faq-list,
+.campus-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.shortcut-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.tile {
+  width: 100%;
+  height: 100%;
+  min-height: 72px;
+  padding: 10px 6px;
+  background: var(--surface-card);
+  border: var(--border-card);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+  color: var(--color-navy);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.3;
+  cursor: pointer;
+  transition: transform var(--transition);
+}
+
+.tile:active {
+  transform: scale(0.97);
+}
+
+.faq-item {
+  width: 100%;
+  min-height: var(--touch);
+  padding: 10px 14px;
+  background: var(--surface-card);
+  border: var(--border-card);
+  border-left: 4px solid var(--color-sky);
+  border-radius: var(--radius-control);
+  text-align: left;
+  cursor: pointer;
+}
+
+.campus-link {
+  display: grid;
+  gap: 2px;
+  min-height: var(--touch);
+  padding: 12px 14px;
+  text-decoration: none;
+}
+
+.campus-title {
+  color: var(--color-school-blue);
+  font-weight: 700;
+}
+
+.campus-note {
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.status {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.status[data-state="error"] {
+  color: var(--color-error);
+}
+
+/* 아래 탭 */
+.tab-bar {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 3;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  min-height: var(--tab-height);
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--color-surface);
+  border-top: 1px solid var(--color-border);
+}
+
+.tab {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--touch);
+  padding: 4px 2px;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  border-top: 3px solid transparent;
+}
+
+.tab[aria-current="page"] {
+  color: var(--color-navy);
+  border-top-color: var(--color-navy);
+}
+
+@media (max-width: 380px) {
+  .shortcut-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .tile {
+    min-height: 56px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition: none !important;
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+
+  .tile:active {
+    transform: none;
+  }
+}
+
+/* 뉴모피즘판(음각·양각) 자리. 설정 화면 이슈에서 html[data-theme="neumorphic"]에 값을 채운다. */
