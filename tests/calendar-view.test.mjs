@@ -231,6 +231,23 @@ test("달력 기본 보기, 키보드 포커스와 메모리 탐색", () => with
   assert.equal(s.calls.length, 1);
 }));
 
+test("같은 날 시험·휴일 카드는 목록과 날짜별 목록에 분류 클래스를 붙임", () => withoutStorage(async () => {
+  const s = setup(async () => response([event("01", "가상 시험"), event("01", "가상 휴일")]),
+    { calendar: true, today: "2027-03-01" });
+  await s.view.refresh();
+  const assertCategories = (container) => {
+    for (const [category, audience] of [["exam", "가상 시험"], ["holiday", "가상 휴일"]]) {
+      const cards = container.byClass("calendar-cat-" + category).filter((node) => node.tagName === "article");
+      assert.equal(cards.length, 1);
+      assert.equal(cards[0].all("h3")[0].textContent, audience);
+    }
+  };
+  assertCategories(s.root.byClass("calendar-day-list")[0]);
+  s.root.byClass("calendar-viewswitch")[0].all("button").find((node) => node.textContent === "목록").dispatch("click");
+  assertCategories(s.list);
+  assert.equal(s.calls.length, 1);
+}));
+
 test("오늘이 범위 밖이면 첫 일정 월 선택", () => withoutStorage(async () => {
   const s = setup(async () => response([event("02")]), { calendar: true, today: "2026-01-01" });
   await s.view.refresh();

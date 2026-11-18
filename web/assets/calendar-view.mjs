@@ -171,7 +171,7 @@ export function mountCalendar({
   }
 
   function renderEvent(event) {
-    const card = element("article", "card calendar-event");
+    const card = element("article", `card calendar-event calendar-cat-${classifyEvent(event)}`);
     card.append(element("h3", "", text(event.audience)));
     const end = validDate(event.ends_on) ? event.ends_on : "";
     card.append(element("p", "", end ? `${event.starts_on} ~ ${end}` : event.starts_on));
