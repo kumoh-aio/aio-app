@@ -31,33 +31,33 @@ export function makeIcons(outDir = defaultDir) {
   const dir = outDir instanceof URL ? outDir : pathToFileURL(outDir.endsWith("/") || outDir.endsWith("\\") ? outDir : outDir + "/");
   mkdirSync(dir, { recursive: true });
   const written = {};
-for (const size of [192, 512]) {
-  const stride = size * 3 + 1;
-  const pixels = Buffer.alloc(stride * size);
-  for (let y = 0; y < size; y += 1) {
-    for (let x = 0; x < size; x += 1) {
-      const nx = x / size;
-      const ny = y / size;
-      const leg = ny > 0.22 && ny < 0.78 && Math.abs(Math.abs(nx - 0.5) - (ny - 0.2) * 0.42) < 0.045;
-      const bar = ny > 0.57 && ny < 0.64 && nx > 0.34 && nx < 0.66;
-      const color = leg || bar ? [255, 209, 0] : [10, 37, 64];
-      const offset = y * stride + 1 + x * 3;
-      pixels.set(color, offset);
+  for (const size of [192, 512]) {
+    const stride = size * 3 + 1;
+    const pixels = Buffer.alloc(stride * size);
+    for (let y = 0; y < size; y += 1) {
+      for (let x = 0; x < size; x += 1) {
+        const nx = x / size;
+        const ny = y / size;
+        const leg = ny > 0.22 && ny < 0.78 && Math.abs(Math.abs(nx - 0.5) - (ny - 0.2) * 0.42) < 0.045;
+        const bar = ny > 0.57 && ny < 0.64 && nx > 0.34 && nx < 0.66;
+        const color = leg || bar ? [255, 209, 0] : [10, 37, 64];
+        const offset = y * stride + 1 + x * 3;
+        pixels.set(color, offset);
+      }
     }
+    const header = Buffer.alloc(13);
+    header.writeUInt32BE(size, 0);
+    header.writeUInt32BE(size, 4);
+    header[8] = 8;
+    header[9] = 2;
+    const png = Buffer.concat([
+      Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      chunk("IHDR", header), chunk("IDAT", deflateSync(pixels)), chunk("IEND", Buffer.alloc(0)),
+    ]);
+    const file = new URL(`icon-${size}.png`, dir);
+    writeFileSync(file, png);
+    written[size] = file;
   }
-  const header = Buffer.alloc(13);
-  header.writeUInt32BE(size, 0);
-  header.writeUInt32BE(size, 4);
-  header[8] = 8;
-  header[9] = 2;
-  const png = Buffer.concat([
-    Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
-    chunk("IHDR", header), chunk("IDAT", deflateSync(pixels)), chunk("IEND", Buffer.alloc(0)),
-  ]);
-  const file = new URL(`icon-${size}.png`, dir);
-  writeFileSync(file, png);
-  written[size] = file;
-}
   return written;
 }
 

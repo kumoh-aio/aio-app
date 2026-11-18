@@ -1,18 +1,25 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import vm from "node:vm";
-// 아이콘은 저장소에 없고 생성기가 만든다. 작업 폴더를 더럽히지 않게 임시 폴더에 만들어 확인한다.
-import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { makeIcons } from "../tools/make-icons.mjs";
-const iconFiles = makeIcons(mkdtempSync(join(tmpdir(), "aio-icons-")));
-
+const webRoot = new URL("../web/", import.meta.url);
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url));
+const generatedIcons = new Map([
+  ["assets/icons/icon-192.png", 192], ["assets/icons/icon-512.png", 512],
+]);
 const files = ["./", "index.html", "manifest.webmanifest", "assets/app.css", "assets/app.js",
   "assets/home.mjs", "assets/router.mjs", "assets/config.mjs", "assets/api.mjs",
-  "assets/icons/icon-192.png", "assets/icons/icon-512.png"];
+  ...generatedIcons.keys()];
+const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/home.mjs", "assets/router.mjs"];
+const requireScreen = process.env.AIO_REQUIRE_FULL_SHELL === "1" ||
+  screenFiles.some((file) => existsSync(new URL(file, webRoot)));
+
+function assertFile(file) {
+  assert.ok(statSync(file, { throwIfNoEntry: false })?.isFile(), `Missing cache file: ${file.pathname}`);
+}
 
 function worker(scope = "https://example.invalid/app/") {
   const events = {};
@@ -30,7 +37,10 @@ function worker(scope = "https://example.invalid/app/") {
   return { events, calls, cache };
 }
 
-test("manifest and real PNG icon dimensions match", () => {
+test("manifest and real PNG icon dimensions match", (context) => {
+  const directory = mkdtempSync(join(tmpdir(), "aio-icons-"));
+  context.after(() => rmSync(directory, { recursive: true, force: true }));
+  const iconFiles = makeIcons(directory);
   const manifest = JSON.parse(read("web/manifest.webmanifest"));
   assert.equal(manifest.name, "아이오 · 금오공대 학사 행정");
   assert.equal(manifest.short_name, "아이오");
@@ -39,12 +49,11 @@ test("manifest and real PNG icon dimensions match", () => {
   assert.equal(manifest.background_color, "#F5F9FC");
   assert.deepEqual(manifest.icons.map((icon) => icon.sizes), ["192x192", "512x512"]);
   for (const icon of manifest.icons) {
-    const size0 = Number(icon.sizes.split("x")[0]);
-    assert.equal(icon.src, `assets/icons/icon-${size0}.png`);
-    const png = readFileSync(iconFiles[size0]);
+    const size = Number(icon.sizes.split("x")[0]);
+    assert.equal(generatedIcons.get(icon.src), size);
+    const png = readFileSync(iconFiles[size]);
     assert.deepEqual([...png.subarray(0, 8)], [137, 80, 78, 71, 13, 10, 26, 10]);
     assert.equal(png.toString("ascii", 12, 16), "IHDR");
-    const size = Number(icon.sizes.split("x")[0]);
     assert.equal(png.readUInt32BE(16), size);
     assert.equal(png.readUInt32BE(20), size);
   }
@@ -59,6 +68,21 @@ for (const scope of ["https://example.invalid/app/", "https://localhost/"]) {
     assert.deepEqual(calls.added, files.map((file) => new URL(file, scope).href));
   });
 }
+
+test("precache files exist or are generated icons", async () => {
+  const scope = "https://example.invalid/";
+  const { events, calls } = worker(scope);
+  let pending;
+  events.install({ waitUntil: (promise) => { pending = promise; } });
+  await pending;
+  for (const url of calls.added) {
+    const file = url.slice(scope.length);
+    if (generatedIcons.has(file)) continue; // PNG dimensions are checked in the generator test.
+    const path = file || "index.html"; // The scope root is served by index.html.
+    if (!requireScreen && screenFiles.includes(path)) continue;
+    assertFile(new URL(path, webRoot));
+  }
+});
 
 test("activate removes only older app caches", async () => {
   const { events, calls } = worker();
