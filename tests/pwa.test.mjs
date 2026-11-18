@@ -60,7 +60,7 @@ function worker(scope = "https://example.invalid/app/") {
       clients: { claim: async () => { calls.claimed += 1; } } },
     caches: { open: async (name) => { calls.opened.push(name); return cache; },
       keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4",
-        "unrelated"],
+        "aio-shell-v5", "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
     fetch: async (request) => { calls.fetched.push(request); return "network"; },
   });
@@ -121,16 +121,42 @@ test("precache files exist or are generated icons", async () => {
   }
 });
 
-test("activate removes v3 and older app caches and keeps CACHE_NAME v4", async () => {
+test("activate removes v4 and older app caches and keeps CACHE_NAME v5", async () => {
   const { events, calls } = worker();
   let pending;
   events.install({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.opened, ["aio-shell-v4"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v5"]);
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.deleted, ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3"]);
+  assert.deepEqual(calls.deleted,
+    ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4"]);
   assert.equal(calls.claimed, 1);
+});
+
+test("more view replaces the empty card with static Android Chrome and iOS Safari install guides", () => {
+  const html = read("web/index.html").toString();
+  const view = html.match(/<section[^>]*data-view="more"[\s\S]*?<\/main>/)?.[0] ?? "";
+  assert.ok(view, "more view exists");
+  assert.doesNotMatch(view, /empty-state|들어갈 예정/);
+  assert.match(view, /홈 화면에 아이오 설치하기/);
+  for (const [platform, heading] of [["android", "Android · Chrome"], ["ios", "iPhone · Safari"]]) {
+    const card = view.match(new RegExp(`<section[^>]*data-install="${platform}"[\\s\\S]*?</section>`))?.[0] ?? "";
+    assert.match(card, /class="card install-card"/, `${platform} card uses the shared card style`);
+    assert.ok(card.includes(heading), `${platform} heading`);
+    assert.match(card, /<ol class="install-steps">/);
+    assert.match(card, /홈 화면에 추가/);
+  }
+  // 정적 안내만 둔다. APK 내려받기, 설치 이벤트 버튼, 외부 링크를 넣지 않는다.
+  assert.doesNotMatch(view, /\.apk|APK|<a\s|<button|<script|href=/i);
+});
+
+test("install guide styles reuse theme variables without new colors", () => {
+  const css = read("web/assets/app.css").toString();
+  const block = css.match(/\.more \{[\s\S]*?(?=@media \(max-width: 380px\))/)?.[0] ?? "";
+  assert.match(block, /\.install-card \{[^}]*border-left: 4px solid var\(--color-sky\)/);
+  assert.match(block, /\.install-lead,\s*\.install-note \{[^}]*color: var\(--color-text-muted\)/);
+  assert.doesNotMatch(block, /#[0-9a-f]{3,6}\b/i, "colors come from :root variables");
 });
 
 test("API, foreign origin, POST and unlisted URLs never touch caches or respondWith", () => {

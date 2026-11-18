@@ -24,10 +24,31 @@
 ## 개발 방식
 
 - 화면은 의존성 없는 HTML·CSS·JavaScript 모듈로 만든다. 서버 저장소의 `api/app/chat_web`과 같은 방식이라 같은 도구로 검사한다.
-- 테스트: 저장소 루트에서 `node --test tests/home.test.mjs tests/router.test.mjs tests/api.test.mjs tests/pwa.test.mjs tests/chat-client.test.mjs tests/chat-history.test.mjs tests/chat-view.test.mjs`
+- 테스트: 저장소 루트에서 아래 명령으로 10개 파일을 하나씩 적어 돌린다. 와일드카드에 기대지 않는다. `AIO_REQUIRE_FULL_SHELL=1`을 켜면 화면 모듈이 빠졌을 때 건너뛰지 않고 실패한다(CI 기본값).
+
+  ```sh
+  AIO_REQUIRE_FULL_SHELL=1 node --test tests/home.test.mjs tests/router.test.mjs tests/api.test.mjs tests/pwa.test.mjs tests/chat-client.test.mjs tests/chat-history.test.mjs tests/chat-view.test.mjs tests/demo-login.test.mjs tests/graduation-view.test.mjs tests/calendar-view.test.mjs
+  ```
 - 아이콘: PNG는 저장소에 넣지 않는다. 미리보기·배포 전에 `node tools/make-icons.mjs`로 `web/assets/icons/`에 만든다. 테스트는 파일을 쓰지 않고 메모리에서 만든 바이트를 검사한다.
 - 로컬 미리보기: `node tools/make-icons.mjs` 다음 `python -m http.server 5173 --directory web` 후 http://127.0.0.1:5173
 - 안드로이드 포장(Capacitor)과 APK 빌드는 GitHub Actions에서만 `npm`을 쓴다. 로컬 PC에는 안드로이드 SDK가 필요 없다.
+
+## PWA 배포(Render 정적 사이트)
+
+비공개 저장소라 무료 GitHub Pages 대신 Render 무료 정적 사이트를 쓴다. Render에 저장소 조직 접근 권한이 있어야 한다.
+
+1. Render에서 **New → Static Site**를 고르고 이 저장소의 `main` 브랜치를 연결한다.
+2. Build Command: `node tools/make-icons.mjs` (아이콘 PNG를 `web/assets/icons/`에 만든다. `npm`은 쓰지 않는다)
+3. Publish Directory: `web`
+4. 배포 주소(`https://….onrender.com`)가 나오면 서버 저장소의 CORS 허용 출처에 넣는다. 그 전에는 화면만 열리고 API 호출은 막힌다.
+5. 화면 파일을 바꿔 배포할 때는 `web/sw.js`의 `CACHE_NAME` 판 번호를 올린다. 새 서비스 워커가 이전 판 캐시를 지운다. API 응답은 캐시하지 않는다.
+
+## 설치
+
+- **Android · Chrome**: 배포 주소를 열고 오른쪽 위 ⋮ 메뉴 → "홈 화면에 추가"나 "앱 설치" → "설치".
+- **iPhone · Safari**: 배포 주소를 열고 공유 버튼(안 보이면 주소창 옆 ··· 메뉴) → "홈 화면에 추가" → "추가".
+- 앱 안에서는 **더보기** 탭에 같은 안내가 있다. 홈 화면 아이콘으로 열면 주소창 없이 `#/home`부터 시작하고, 한 번 연 화면은 오프라인에서도 열린다.
+- 안드로이드 APK는 GitHub Actions 릴리스에 올라가며 저장소 구성원만 받을 수 있다. 앱 안 안내에는 APK 링크를 넣지 않는다.
 
 ## 문서
 

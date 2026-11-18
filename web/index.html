@@ -42,7 +42,29 @@
 
     <section class="view" data-view="more" aria-labelledby="title-more" hidden>
       <h1 id="title-more" class="view-title" tabindex="-1">더보기</h1>
-      <div class="card empty-state"><p>설정과 앱 정보가 여기에 들어갈 예정이에요.</p></div>
+      <div class="more">
+        <section class="home-section" aria-labelledby="title-install">
+          <h2 id="title-install" class="section-title">홈 화면에 아이오 설치하기</h2>
+          <p class="install-lead">브라우저 메뉴에서 홈 화면에 추가하면 앱처럼 바로 열려요. 한 번 연 화면은 인터넷 없이도 열리지만, 답변과 일정은 연결이 필요해요.</p>
+          <section class="card install-card" data-install="android" aria-labelledby="title-install-android">
+            <h3 id="title-install-android" class="install-title">Android · Chrome</h3>
+            <ol class="install-steps">
+              <li>Chrome에서 아이오 주소를 열어요.</li>
+              <li>오른쪽 위 ⋮ 메뉴를 눌러요.</li>
+              <li>"홈 화면에 추가"나 "앱 설치"를 고르고 "설치"를 눌러요.</li>
+            </ol>
+          </section>
+          <section class="card install-card" data-install="ios" aria-labelledby="title-install-ios">
+            <h3 id="title-install-ios" class="install-title">iPhone · Safari</h3>
+            <ol class="install-steps">
+              <li>Safari에서 아이오 주소를 열어요.</li>
+              <li>공유 버튼(네모에서 화살표가 나온 모양)을 눌러요. 안 보이면 주소창 옆 ··· 메뉴에서 찾아요.</li>
+              <li>"홈 화면에 추가"를 고르고 오른쪽 위 "추가"를 눌러요.</li>
+            </ol>
+          </section>
+          <p class="install-note">홈 화면의 아이오 아이콘을 누르면 주소창 없이 홈 탭부터 열려요.</p>
+        </section>
+      </div>
     </section>
   </main>
 
