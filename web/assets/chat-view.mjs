@@ -19,6 +19,9 @@ export const TEXT = Object.freeze({
   inputLabel: "아이오에게 질문",
   inputPlaceholder: "예: 휴학 신청은 어디서 하나요?",
   submit: "보내기",
+  stop: "중단",
+  stopLabel: "응답 중단",
+  stopped: "응답을 중단했습니다.",
   pen: "손글씨로 입력",
   inputEmpty: "질문을 입력해 주세요.",
   chipsTitle: "추천 질문",
@@ -177,11 +180,12 @@ function el(doc, tag, { className, text, attrs } = {}) {
  *           history: { load(): { sessionId: string|null, turns: { selectedVersion: number, versions: object[] }[] },
  *                      save(state: object): boolean, clear(): void },
  *           handwriting?: { open(options: { trigger: any, lang: string, onInsert: (text: string) => void }): void },
- *           quickActions?: { id: string, label: object, run?: Function }[] }} options
+ *           quickActions?: { id: string, label: object, run?: Function }[],
+ *           sendIcon?: (button: any) => { setStopping(on: boolean): void } }} options
  *   handwriting(선택): 손글씨 패드. 없으면 펜 버튼을 그리지 않는다.
  * @returns {{ ask(pending: { question: string, mode?: string }): Promise<object|null>, closeQuickActions(): void, readonly busy: boolean }}
  */
-export function mountChat({ root, doc, storage, send, history, handwriting, quickActions }) {
+export function mountChat({ root, doc, storage, send, history, handwriting, quickActions, sendIcon }) {
   if (!root || !doc || typeof send !== "function" || !history) {
     throw new TypeError("mountChat needs root, doc, send and history");
   }
@@ -269,7 +273,21 @@ export function mountChat({ root, doc, storage, send, history, handwriting, quic
   });
   const inputError = el(doc, "p", { className: "field-error", attrs: { id: "chat-error", "aria-live": "polite" } });
   inputError.hidden = true;
-  const submit = el(doc, "button", { className: "button-primary", text: TEXT.submit, attrs: { type: "submit", "data-chat-submit": "" } });
+  const submit = el(doc, "button", {
+    className: "button-primary chat-send",
+    attrs: { type: "submit", "data-chat-submit": "", "data-state": "send", "aria-label": TEXT.submit },
+  });
+  const submitLabel = el(doc, "span", { className: "chat-send-label", text: TEXT.submit });
+  submit.append(submitLabel);
+  const submitIcon = sendIcon?.(submit);
+  submit.addEventListener("click", (event) => {
+    if (!active) return;
+    // 중단하면서 type이 submit으로 돌아가도 이 클릭으로 폼을 제출하지 않는다.
+    event.preventDefault();
+    cancelActive();
+    setStatus(TEXT.stopped, "stopped");
+    submit.focus();
+  });
   const formRow = el(doc, "div", { className: "chat-form-row" });
   // 손글씨 펜 버튼은 입력창과 보내기 사이에 둔다. textarea에는 덮개·포인터 처리기·터치 동작 CSS를
   // 더하지 않는다(iPad Scribble 같은 기기 손글씨 입력이 그대로 동작해야 한다).
@@ -410,7 +428,11 @@ export function mountChat({ root, doc, storage, send, history, handwriting, quic
   }
 
   function setBusy(on) {
-    submit.disabled = on;
+    submit.setAttribute("type", on ? "button" : "submit");
+    submit.setAttribute("data-state", on ? "stop" : "send");
+    submit.setAttribute("aria-label", on ? TEXT.stopLabel : TEXT.submit);
+    if (submitIcon) submitIcon.setStopping(on);
+    else submitLabel.textContent = on ? TEXT.stop : TEXT.submit;
     for (const button of chipButtons) button.disabled = on;
     root.setAttribute?.("aria-busy", on ? "true" : "false");
     for (const turn of turns) paintControls(turn);
