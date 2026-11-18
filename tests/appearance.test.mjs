@@ -445,6 +445,12 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
   const ringDoc = design.slice(design.indexOf("## 아이오 빠른 실행 링"));
   assert.ok(ringDoc.length > 0 && design.includes("## 아이오 빠른 실행 링"), "설계 절");
   assert.doesNotMatch(ringDoc, /data-qa-hub|가운데 원 1개|버블 수보다 하나 많다/, "설계도 버블마다 채움 원 하나");
+  // 설계 표는 액션 ID 순서와 ko 라벨만 적고, en·zh 문구는 앱 문구 표를 원본으로 삼아 두 벌로 어긋나지 않게 한다.
+  const rows = [...ringDoc.matchAll(/^\| (\d) \| `([a-z]+)` \| ([^|]+) \|/gm)].map(([, order, id, ko]) => [order, id, ko.trim()]);
+  assert.deepEqual(rows, [["1", "calendar", "학사일정"], ["2", "graduation", "졸업 진단"],
+    ["3", "biskit", "BISKIT 추천"], ["4", "handwriting", "손글씨 입력"]]);
+  assert.doesNotMatch(ringDoc, /Academic calendar|Graduation check|学年日程|毕业审核/, "실제 화면과 다른 예전 문구");
+  assert.match(ringDoc, /--qa-label-x`·`--qa-label-y`/, "배치 함수가 라벨 자리를 넘기는 계약");
   assert.match(rule('.qa-ring[data-open="true"] .qa-item'), /pointer-events:\s*auto/);
 
   const label = rule(".qa-label");
@@ -458,11 +464,12 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
     cx: "calc(var(--qa-origin-x, 0px) + var(--qa-x, 0px))",
     cy: "calc(var(--qa-origin-y, 0px) + var(--qa-y, 0px))",
     gap: "calc(var(--qa-size) / 2 + 4px)",
-    dx: "calc(-50% + clamp(-50%, var(--qa-x, 0px) * 1000, 50%))",
+    // 배치 함수가 넘긴 라벨 자리(--qa-label-x·y)가 먼저이고, 방향 규칙은 값이 없을 때의 기본값이다.
+    dx: "var(--qa-label-x, calc(-50% + clamp(-50%, var(--qa-x, 0px) * 1000, 50%)))",
     above: "calc(-1 * var(--qa-label-gap) - 100%)",
     side: "calc(var(--qa-label-gap) + clamp(calc(-2 * var(--qa-label-gap) - 100%), var(--qa-y, 0px) * 1000, 0px))",
     flip: "clamp(0px, calc((4px - var(--qa-label-cy) - var(--qa-label-above)) * 1000), calc(2 * var(--qa-label-gap) + 100%))",
-    dy: "max(var(--qa-label-side), calc(var(--qa-label-above) + var(--qa-label-flip)))",
+    dy: "var(--qa-label-y, max(var(--qa-label-side), calc(var(--qa-label-above) + var(--qa-label-flip))))",
   });
   const shift = label.match(/transform:\s*translate\(([\s\S]+)\);/)?.[1].replace(/\s+/g, " ").trim();
   assert.equal(shift,
@@ -472,13 +479,13 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
 
   // 위 선언을 그대로 옮긴 계산이다. CSS clamp(a, b, c)는 max(a, min(b, c))이고 %는 라벨 자신의 너비·높이다.
   const clamp = (low, value, high) => Math.max(low, Math.min(value, high));
-  const labelBox = ({ cx, cy, qx, qy, w, h, vw, vh }) => {
+  const labelBox = ({ cx, cy, qx, qy, w, h, vw, vh, lx, ly }) => {
     const gap = size / 2 + 4;
-    const dx = -w / 2 + clamp(-w / 2, qx * 1000, w / 2);
+    const dx = lx ?? -w / 2 + clamp(-w / 2, qx * 1000, w / 2);
     const above = -gap - h;
     const side = gap + clamp(-2 * gap - h, qy * 1000, 0);
     const flip = clamp(0, (4 - cy - above) * 1000, 2 * gap + h);
-    const dy = Math.max(side, above + flip);
+    const dy = ly ?? Math.max(side, above + flip);
     const left = cx + clamp(4 - cx, dx, vw - 4 - cx - w);
     const top = cy + clamp(4 - cy, dy, vh - 4 - cy - h);
     return { left, top, right: left + w, bottom: top + h };
@@ -516,6 +523,13 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
       }
     }
   }
+  // 배치 함수가 라벨 자리를 넘기면 방향 규칙 대신 그 값을 쓰고, 화면 안이면 그대로 둔다.
+  // 예: 버블이 한 줄로 놓인 320×180 화면에서 배치 함수가 라벨을 위·아래 두 줄로 나눈 경우.
+  assert.deepEqual(labelBox({ cx: 170, cy: 85, qx: 120, qy: 0, w: 93, h: 22, vw: 320, vh: 180, lx: -46.5, ly: -50 }),
+    { left: 123.5, top: 35, right: 216.5, bottom: 57 });
+  // 넘긴 자리가 화면 밖이면 화면 네 변 4px 안으로만 막는다.
+  assert.deepEqual(labelBox({ cx: 290, cy: 85, qx: 240, qy: 0, w: 101, h: 22, vw: 320, vh: 180, lx: -50.5, ly: 28 }),
+    { left: 215, top: 113, right: 316, bottom: 135 });
   // 위쪽 공간이 넉넉한 맨 위 버블 라벨은 버블 위 4px 가운데 정렬 그대로다.
   assert.deepEqual(labelBox({ cx: 160, cy: 300, qx: 0, qy: -100, w: 70, h: 22, vw: 320, vh: 640 }),
     { left: 125, top: 250, right: 195, bottom: 272 });
