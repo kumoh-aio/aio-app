@@ -702,7 +702,12 @@ test("선택 표시: 가는 쪽 모서리가 먼저 출발하고 지연과 시�
   const tokens = rule(".mode-group,\n.tab-bar");
   const duration = toMs(tokens.match(/--indicator-duration:\s*([^;]+);/)[1]);
   const lag = toMs(tokens.match(/--indicator-lag:\s*([^;]+);/)[1]);
+  const trailMs = toMs(tokens.match(/--indicator-trail:\s*([^;]+);/)[1]);
+  // 뒤 모서리는 지연(lag)을 두고 출발한다. 지연과 시간의 합은 300ms 미만이고, 앞 모서리보다 늦게 끝난다.
   assert.ok(lag > 0 && duration > 0 && lag + duration < 300, `${lag} + ${duration}ms`);
+  assert.ok(lag + trailMs < 300 && lag + trailMs > duration, `뒤 모서리 ${lag} + ${trailMs}ms`);
+  // 지연이 길면 방향이 어긋난 재선택에서 멈춘 끝이 오래 추월당하므로 앞 모서리 시간의 1/4 이하로 둔다.
+  assert.ok(lag <= duration / 4, `지연 ${lag}ms`);
   const ease = tokens.match(/--indicator-ease:\s*cubic-bezier\(([^)]+)\)/)?.[1].split(",").map(Number);
   assert.ok(ease?.length === 4, "기본 곡선은 cubic-bezier");
   assert.ok(ease[0] < ease[1] && ease[3] === 1, "처음이 빠른 ease-out");
@@ -711,8 +716,8 @@ test("선택 표시: 가는 쪽 모서리가 먼저 출발하고 지연과 시�
     .split(/,\s*(?![^()]*\))/).map((part) => part.trim().split(/\s+/)).map(([prop, ...rest]) => [prop, rest.join(" ")]));
   const both = (suffix) => `.mode-group[data-indicator="ready"]${suffix}::before,\n.tab-bar[data-indicator="ready"]${suffix}::before`;
   const lead = "var(--indicator-duration) var(--indicator-ease)";
-  // 늦은 끝은 지연(transition-delay) 없이 같은 순간 출발해 lag만큼 더 길게 움직인다.
-  const trail = "calc(var(--indicator-duration) + var(--indicator-lag)) var(--indicator-ease)";
+  // 뒤 모서리: --indicator-lag 지연 뒤 --indicator-trail 동안 움직인다.
+  const trail = "var(--indicator-trail) var(--indicator-ease) var(--indicator-lag)";
   assert.deepEqual(transitionOf(both("")), { left: lead, right: lead, "border-color": "var(--indicator-duration) ease-out" });
   assert.deepEqual(transitionOf(both('[data-indicator-dir="forward"]')),
     { left: trail, right: lead, "border-color": "var(--indicator-duration) ease-out" }, "오른쪽으로: 오른쪽 끝이 먼저");
@@ -724,10 +729,10 @@ test("선택 표시: 가는 쪽 모서리가 먼저 출발하고 지연과 시�
   }
   // 사용자 지정 속성 대신 left·right를 전환하므로 @property 등록이 필요 없다.
   assert.doesNotMatch(css, /@property/);
-  // 표식 전환 어디에도 지연을 두지 않는다. 멈춘 끝은 방향이 어긋났을 때 다른 끝에 추월당한다.
-  for (const [, body] of css.matchAll(/data-indicator="ready"[^{}]*\{([^{}]*)\}/g)) {
-    assert.doesNotMatch(body, /transition-delay|\)\s+var\(--indicator-ease\)\s+var\(--indicator-lag\)/);
-  }
+  // 방향이 없는 ready 규칙은 두 모서리를 같이 옮기고, 지연은 방향 규칙의 뒤 모서리에만 있다.
+  const delayed = [...css.matchAll(/([^{}]+)\{[^{}]*var\(--indicator-lag\)[^{}]*\}/g)]
+    .flatMap(([, selector]) => selector.split(",").map((part) => part.trim()));
+  assert.ok(delayed.length === 4 && delayed.every((part) => /\[data-indicator-dir="(?:forward|back)"\]/.test(part)), delayed.join(" | "));
 });
 
 // cubic-bezier(x1, y1, x2, y2)를 이분법으로 푼다(x가 단조 증가하므로 수렴한다).
@@ -759,35 +764,42 @@ function linearEasing(source) {
   };
 }
 
-test("선택 표시: 전환 도중 다시 골라 방향이 어긋나도 탭 선이 최소 폭 밑으로 줄지 않는다", () => {
+test("선택 표시: 전환 도중 다시 고르면 맞는 방향은 늘어나고, 어긋난 방향도 표식이 사라지지 않는다", () => {
   const { css, rule } = indicatorCss();
   const tokens = rule(".mode-group,\n.tab-bar");
   const duration = toMs(tokens.match(/--indicator-duration:\s*([^;]+);/)[1]);
   const lag = toMs(tokens.match(/--indicator-lag:\s*([^;]+);/)[1]);
+  const trailMs = toMs(tokens.match(/--indicator-trail:\s*([^;]+);/)[1]);
   const minWidth = Number(rule(".mode-group[data-indicator]::before,\n.tab-bar[data-indicator]::before")
     .match(/min-width:\s*(\d+)px/)[1]);
   const eases = {
     "cubic-bezier": cubicBezier(...tokens.match(/cubic-bezier\(([^)]+)\)/)[1].split(",").map(Number)),
     "linear() 스프링": linearEasing(css.match(/--indicator-ease:\s*linear\(([^)]+)\)/)[1]),
   };
-  // CSS 규칙을 그대로 옮긴다: forward는 left가, back은 right가 lag만큼 길게 움직이고 둘 다 지연은 없다.
-  const timing = (dir) => ({ left: duration + (dir === "forward" ? lag : 0), right: duration + (dir === "back" ? lag : 0) });
+  // CSS 규칙을 그대로 옮긴다: 앞 모서리는 지연 없이 duration, 뒤 모서리(forward는 left, back은 right)는
+  // lag 지연 뒤 trail 동안 움직인다. 지연 중인 끝은 전환 시작 값에 머문다.
+  const lead = { delay: 0, ms: duration };
+  const behind = { delay: lag, ms: trailMs };
+  const timing = (dir) => ({ left: dir === "forward" ? behind : lead, right: dir === "back" ? behind : lead });
   // 320px 화면의 다섯 탭(각 64px). 표식 좌표는 탭 막대 안쪽 경계에서의 left·right다.
   const container = 320;
   const tab = (index) => ({ left: 64 * index, right: container - 64 * (index + 1) });
+  // widths는 left·right로 계산한 폭이다(CSS min-width가 걸기 전 값). travel은 마지막 선택의 가장 긴 모서리 이동량이다.
   const run = (ease, steps) => {
     let edges = null;
     const widths = [];
+    let travel = 0;
     let now = 0;
     for (const { at, from, to, dir } of steps) {
       for (; edges && now < at; now += 1) widths.push(container - edges.left(now) - edges.right(now));
       const start = edges ? { left: edges.left(at), right: edges.right(at) } : from;
       const { left, right } = timing(dir);
-      const move = (a, b, ms) => (t) => a + (b - a) * ease(Math.min(1, Math.max(0, (t - at) / ms)));
+      const move = (a, b, { delay, ms }) => (t) => a + (b - a) * ease(Math.min(1, Math.max(0, (t - at - delay) / ms)));
       edges = { left: move(start.left, to.left, left), right: move(start.right, to.right, right) };
+      travel = Math.max(Math.abs(to.left - start.left), Math.abs(to.right - start.right));
     }
-    for (const end = now + duration + lag + 40; now <= end; now += 1) widths.push(container - edges.left(now) - edges.right(now));
-    return widths;
+    for (const end = now + lag + trailMs + 40; now <= end; now += 1) widths.push(container - edges.left(now) - edges.right(now));
+    return { widths, travel };
   };
   for (const [name, ease] of Object.entries(eases)) {
     // 예전 재현: 홈 → 더보기 전환 15ms 뒤 일정. 최신 재현: 같은 흐름에서 한 프레임(16ms) 뒤 일정.
@@ -797,19 +809,21 @@ test("선택 표시: 전환 도중 다시 골라 방향이 어긋나도 탭 선�
       // 맞는 방향(forward, 표식이 일정 왼쪽에 있으므로 오른쪽으로 간다): 늦은 끝(left)이 뒤따라 표식이 일정 폭보다
       // 좁아지지 않는다. 스프링 넘침(1.5%)만큼만 허용한다. 실제 방향 판정은 동작 모듈 테스트가 맡는다.
       const right = run(ease, steps("forward"));
-      const travel = 129.5;
-      assert.ok(Math.min(...right.slice(at)) >= 64 - 0.02 * travel,
-        `${name} ${at}ms 뒤 forward: 늘어나는 쪽이어야 하는데 ${Math.min(...right.slice(at)).toFixed(1)}px까지 좁아짐`);
-      assert.ok(Math.abs(right.at(-1) - 64) < 0.01, `${name} ${at}ms 뒤 forward: 일정 탭 64px에 안착`);
-      // 잘못 정한 방향(back, 직전 목표 기준): 좁아지는 것은 동작 모듈 결함이지만, CSS는 표식을 사라지게 하지 않는다.
+      const afterRight = Math.min(...right.widths.slice(at));
+      assert.ok(afterRight >= 64 - 0.02 * right.travel,
+        `${name} ${at}ms 뒤 forward: 늘어나는 쪽이어야 하는데 ${afterRight.toFixed(1)}px까지 좁아짐`);
+      assert.ok(Math.max(...right.widths.slice(at)) > 64 + 2, `${name} ${at}ms 뒤 forward: 늘어남이 보인다`);
+      assert.ok(Math.abs(right.widths.at(-1) - 64) < 0.01, `${name} ${at}ms 뒤 forward: 일정 탭 64px에 안착`);
+      // 잘못 정한 방향(back, 직전 목표 기준)은 동작 모듈 결함이다. 앞 모서리가 지연 중인 뒤 모서리 쪽으로 다가가
+      // 계산 폭이 줄 수 있으므로, CSS는 min-width로 그 폭을 받친다(렌더링 폭 = max(계산 폭, min-width)).
       const wrong = run(ease, steps("back"));
-      const narrowest = Math.min(...wrong);
-      assert.ok(narrowest >= minWidth, `${name} ${at}ms 뒤 back: 가장 좁은 폭 ${narrowest.toFixed(1)}px`);
-      assert.ok(Math.min(...right.slice(at)) > narrowest, `${name} ${at}ms 뒤: 맞는 방향이 잘못된 방향보다 넓다`);
-      assert.ok(Math.abs(wrong.at(-1) - 64) < 0.01, `${name} ${at}ms 뒤 back: 일정 탭 64px에 안착`);
+      const rendered = Math.min(...wrong.widths.map((width) => Math.max(width, minWidth)));
+      assert.ok(rendered >= minWidth, `${name} ${at}ms 뒤 back: 렌더링 폭 ${rendered.toFixed(1)}px`);
+      assert.ok(afterRight > Math.min(...wrong.widths.slice(at)), `${name} ${at}ms 뒤: 맞는 방향이 잘못된 방향보다 넓다`);
+      assert.ok(Math.abs(wrong.widths.at(-1) - 64) < 0.01, `${name} ${at}ms 뒤 back: 일정 탭 64px에 안착`);
     }
     // 맞는 방향의 한 칸 이동은 늘어났다가 안착 폭으로 돌아온다.
-    const stretch = run(ease, [{ at: 0, from: tab(0), to: tab(1), dir: "forward" }]);
+    const stretch = run(ease, [{ at: 0, from: tab(0), to: tab(1), dir: "forward" }]).widths;
     assert.ok(Math.max(...stretch) > 64 + 2, `${name} 한 칸 이동 최대 폭 ${Math.max(...stretch).toFixed(1)}px`);
     assert.ok(Math.abs(stretch.at(-1) - 64) < 0.01);
   }
@@ -897,7 +911,7 @@ test("선택 표시: 설계 문서에 웹 화면이 맞출 시간·곡선·토�
   const section = design.slice(at, next === -1 ? undefined : next);
   const { rule, css } = indicatorCss();
   const tokens = rule(".mode-group,\n.tab-bar");
-  for (const name of ["duration", "lag"]) {
+  for (const name of ["duration", "lag", "trail"]) {
     const declared = tokens.match(new RegExp(`--indicator-${name}:\\s*([^;]+);`))[1].trim();
     assert.ok(section.includes(`\`--indicator-${name}: ${declared}\``), `${name} ${declared}`);
   }

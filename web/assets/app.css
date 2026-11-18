@@ -1547,9 +1547,9 @@ html[data-theme="neumorphic"] :is(
    같은 뜻)와 data-indicator(instant | ready), data-indicator-dir(forward = 오른쪽으로, back = 왼쪽으로)를 넣는다.
    data-indicator가 없으면 ::before를 만들지 않아 지금 모양 그대로다. instant도 버튼 채움과 탭 위 선은 그대로 두고,
    보이지 않는 표식만 좌표에 미리 놓는다. ready가 되면 기존 강조를 표식으로 옮기고 그 자리에서 전환을 시작한다.
-   두 모서리는 같은 순간에 출발한다. 가는 쪽은 --indicator-duration, 반대쪽은 --indicator-lag만큼 더 길게 움직여
-   표식이 늘어났다가 줄어든다. 늦은 끝을 transition-delay로 세워 두면, 전환 도중 다시 골라 방향이 실제 위치와
-   어긋났을 때 멈춘 끝을 다른 끝이 넘어가 표식이 사라진다. 시간 차이만 두면 두 끝이 첫 프레임부터 같은 쪽으로 움직인다.
+   가는 쪽 모서리는 바로 --indicator-duration 동안, 반대쪽 모서리는 --indicator-lag 지연 뒤 --indicator-trail 동안
+   움직여 표식이 늘어났다가 줄어든다(지연 + 시간 260ms). 방향은 JS가 지금 그려진 표식 위치로 정한다.
+   방향이 어긋나도 표식이 사라지지 않게 지연을 짧게(40ms) 두고 min-width를 안전망으로 둔다.
    전환 중에는 표식이 새로 고른 버튼 아래에 아직 없으므로, 표식은 면 색 채움과 2px 경계로 그리고
    버튼 글자는 바탕(--color-paper)과 표식(--color-surface) 어느 쪽 위에서도 4.5:1인 색만 쓴다.
    움직이는 2px 좌우 경계가 같은 색 글자 뒤를 지나가므로, ready 버튼 글자에는 표식 채움색 1px 테두리를 둘러
@@ -1562,7 +1562,8 @@ html[data-theme="neumorphic"] :is(
 .mode-group,
 .tab-bar {
   --indicator-duration: 200ms;
-  --indicator-lag: 60ms;
+  --indicator-lag: 40ms;
+  --indicator-trail: 220ms;
   --indicator-ease: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -1640,7 +1641,7 @@ html[data-theme="neumorphic"] :is(
 
 .mode-group[data-indicator="ready"][data-indicator-dir="forward"]::before,
 .tab-bar[data-indicator="ready"][data-indicator-dir="forward"]::before {
-  transition: left calc(var(--indicator-duration) + var(--indicator-lag)) var(--indicator-ease),
+  transition: left var(--indicator-trail) var(--indicator-ease) var(--indicator-lag),
     right var(--indicator-duration) var(--indicator-ease),
     border-color var(--indicator-duration) ease-out;
 }
@@ -1648,7 +1649,7 @@ html[data-theme="neumorphic"] :is(
 .mode-group[data-indicator="ready"][data-indicator-dir="back"]::before,
 .tab-bar[data-indicator="ready"][data-indicator-dir="back"]::before {
   transition: left var(--indicator-duration) var(--indicator-ease),
-    right calc(var(--indicator-duration) + var(--indicator-lag)) var(--indicator-ease),
+    right var(--indicator-trail) var(--indicator-ease) var(--indicator-lag),
     border-color var(--indicator-duration) ease-out;
 }
 
