@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { mountAppearance } from "../web/assets/appearance.mjs";
 
 const read = (path) => readFileSync(new URL(`../web/${path}`, import.meta.url), "utf8");
@@ -311,6 +311,282 @@ test("통합 달력 보기: 격자 첫 행에 일~토 요일 머리를 그린다
   const source = integratedCalendarSource(t);
   if (source === null) return;
   assert.match(source, /["']columnheader["']/);
+});
+
+// ---- 아이오 빠른 실행 링 ----
+
+function qaCss() {
+  const css = read("assets/app.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  // 주석이 일찍 닫히면 남은 설명 줄이 다음 선택자에 붙어 규칙 전체가 버려진다.
+  assert.doesNotMatch(css, /\*\//, "주석 밖에 남은 */가 없다");
+  assert.match(css, /\}\s*\.qa-defs \{/, ".qa-defs 선택자 앞에는 이전 규칙의 닫는 괄호만 온다");
+  const start = css.indexOf(".qa-defs {");
+  const end = css.lastIndexOf(":focus-visible");
+  assert.ok(start > 0 && start < end, "빠른 실행 링 규칙은 마지막 포커스 규칙 앞에 둔다");
+  const block = css.slice(start, end);
+  const rule = (selector) => {
+    const at = block.indexOf(`${selector} {`);
+    assert.ok(at >= 0, selector);
+    return block.slice(at, block.indexOf("}", at));
+  };
+  return { css, block, rule };
+}
+
+function palettes() {
+  const css = read("assets/app.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const tokens = (body) => Object.fromEntries(
+    [...body.matchAll(/--([\w-]+):\s*([^;]+);/g)].map(([, key, value]) => [key, value.trim()]));
+  const block = (pattern) => tokens(css.match(pattern)?.[1] ?? "");
+  const light = block(/(?:^|\})\s*:root\s*\{([^{}]*)\}/);
+  const dark = { ...light, ...block(/:root\[data-color-mode="dark"\]\s*\{([^{}]*)\}/) };
+  const system = { ...light, ...block(/@media \(prefers-color-scheme: dark\)\s*\{[^{}]+\{([^{}]*)\}/) };
+  return [["light", light], ["dark", dark], ["system", system]].map(([label, palette]) => {
+    const resolve = (value) => {
+      const alias = value?.match(/^var\(--([\w-]+)\)$/)?.[1];
+      return alias ? resolve(palette[alias]) : value?.toUpperCase();
+    };
+    return [label, resolve];
+  });
+}
+
+test("빠른 실행 링: goo 필터는 아이오 화면 밖 크기 0 장식 SVG에 정해진 값으로 있다", () => {
+  const html = read("index.html");
+  const svgs = [...html.matchAll(/<svg\b([^>]*)>([\s\S]*?)<\/svg>/g)];
+  const defs = svgs.filter(([, , body]) => body.includes('id="aio-goo"'));
+  assert.equal(defs.length, 1, "필터 정의는 한 곳");
+  const [whole, attrs, body] = defs[0];
+  assert.match(attrs, /\baria-hidden="true"/);
+  assert.match(attrs, /\bwidth="0"/);
+  assert.match(attrs, /\bheight="0"/);
+  assert.doesNotMatch(whole, /\sstyle\s*=|xmlns|https?:|href/i, "style 속성·외부 주소 없음");
+
+  const at = html.indexOf(whole);
+  assert.ok(at > html.indexOf("</main>") && at > html.indexOf("</nav>"), "아이오 화면 구역과 탭 막대 밖");
+  assert.ok(at < html.indexOf("</body>"), "</body> 바로 앞");
+  const aio = html.match(/<section class="view" data-view="aio"[\s\S]*?<\/section>/)?.[0] ?? "";
+  assert.doesNotMatch(aio, /aio-goo|<svg/, "아이오 화면 구역 마크업은 그대로");
+
+  const filter = body.match(/<filter\b([^>]*)>([\s\S]*?)<\/filter>/);
+  assert.ok(filter, "filter 요소");
+  const filterAttrs = Object.fromEntries([...filter[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(([, k, v]) => [k, v]));
+  assert.equal(filterAttrs.id, "aio-goo");
+  assert.equal(filterAttrs["color-interpolation-filters"], "sRGB");
+  // 흐림이 번지는 3σ(30px)만큼 잘리지 않도록 경계 상자 바깥까지 필터 영역을 넓힌다.
+  assert.deepEqual([filterAttrs.x, filterAttrs.y, filterAttrs.width, filterAttrs.height], ["-50%", "-50%", "200%", "200%"]);
+
+  const primitives = [...filter[2].matchAll(/<(fe\w+)\b([^>]*)\/?>/g)].map(([, name, rest]) => [name,
+    Object.fromEntries([...rest.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, k, v]) => [k, v]))]);
+  assert.deepEqual(primitives.map(([name]) => name), ["feGaussianBlur", "feColorMatrix"]);
+  const [[, blur], [, matrix]] = primitives;
+  assert.equal(Number(blur.stdDeviation), 10);
+  assert.equal(matrix.type, "matrix");
+  assert.equal(matrix.in, blur.result, "흐린 결과에 알파 행렬을 건다");
+  const values = matrix.values.trim().split(/\s+/).map(Number);
+  assert.equal(values.length, 20);
+  assert.deepEqual(values.slice(0, 15), [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0], "색 채널은 그대로");
+  assert.deepEqual(values.slice(15), [0, 0, 0, 19, -9], "알파 행");
+
+  // 필터 정의 SVG를 display: none으로 숨기면 일부 브라우저가 참조를 잃는다.
+  const { rule } = qaCss();
+  assert.doesNotMatch(rule(".qa-defs"), /display:\s*none/);
+  assert.match(rule(".qa-defs"), /position:\s*absolute/);
+});
+
+test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·라벨은 필터 밖 44px 이상이다", () => {
+  const { css, block, rule } = qaCss();
+  assert.doesNotMatch(block, /url\(|gradient|backdrop-filter|filter:/, "CSS 필터·그라데이션·유리 효과 없음");
+  // 링은 + 버튼과 떨어진 자리(입력 행 뒤)에 붙어도 트리거 중심에서 펼쳐지도록 화면 고정 레이어에 원점 변수를 쓴다.
+  const ring = rule(".qa-ring");
+  assert.match(ring, /position:\s*fixed;\s*inset:\s*0;/);
+  assert.match(ring, /pointer-events:\s*none/, "닫힌 링 레이어가 화면 누르기를 막지 않는다");
+  assert.match(rule(".qa-items"), /top:\s*var\(--qa-origin-y, 0px\);\s*left:\s*var\(--qa-origin-x, 0px\);/);
+  // 크기 0 SVG는 그려지지 않으므로 장식 SVG는 화면 전체를 덮는다. viewBox 폭(innerWidth)은 세로 스크롤바를
+  // 포함하므로 100%(스크롤바 제외) 대신 같은 기준인 100vw·100dvh로 맞춰 채움이 축소되지 않게 한다.
+  const goo = rule(".qa-goo");
+  assert.match(goo, /top:\s*0;\s*left:\s*0;\s*width:\s*100vw;\s*height:\s*100vh;\s*height:\s*100dvh;/);
+  assert.doesNotMatch(goo, /(?:width|height):\s*100%/, "스크롤바를 뺀 폭은 viewBox와 어긋난다");
+  assert.doesNotMatch(goo, /(?:^|[^-])(?:width|height):\s*0/, "장식 SVG viewport는 0이 아니다");
+  assert.match(goo, /pointer-events:\s*none/);
+  assert.match(goo, /opacity:\s*0/, "닫힌 링의 채움은 + 버튼을 가리지 않는다");
+  assert.match(rule('.qa-ring[data-open="true"] .qa-goo'), /opacity:\s*1/);
+  assert.match(rule(".qa-blob"), /fill:\s*var\(--color-school-blue\)/);
+
+  const size = Number(rule(".qa-ring").match(/--qa-size:\s*(\d+)px/)?.[1]);
+  assert.ok(size >= 44, `버블 지름 ${size}px`);
+  // 배치 함수와 채움 원(r = 지름/2)은 설계 문서의 지름을 쓴다. 버튼 지름이 다르면 버튼과 채움 크기가 어긋난다.
+  const designDoc = readFileSync(new URL("../docs/DESIGN.md", import.meta.url), "utf8");
+  const designSize = Number(designDoc.match(/버블 지름은 `--qa-size: (\d+)px`/)?.[1]);
+  assert.equal(size, designSize, "CSS 버블 지름은 설계 문서 값과 같다");
+  assert.equal(size, 48, "동작 작업의 배치·채움 원 지름 48px(r 24)과 같다");
+  const item = rule(".qa-item");
+  assert.match(item, /width:\s*var\(--qa-size\);\s*height:\s*var\(--qa-size\)/);
+  assert.match(item, /min-width:\s*var\(--touch\);\s*min-height:\s*var\(--touch\)/);
+  assert.match(item, /border:\s*1px solid var\(--color-control-border\)/);
+  assert.match(item, /color:\s*var\(--color-on-accent\)/);
+  assert.match(item, /pointer-events:\s*none/, "닫힌 버블은 누를 수 없다");
+  assert.doesNotMatch(item, /outline/, "포커스는 공통 외곽선을 쓴다");
+
+  // 버튼은 원점에 놓인 .qa-items 안에서, 채움은 viewBox로 원점이 트리거 중심에 맞춰진 SVG 안에서 움직인다.
+  // 두 레이어 모두 원점 기준이므로 같은 이동량만 쓰고, 채움에 원점을 다시 더하면 트리거 좌표만큼 밀린다.
+  const transformOf = (selector) => rule(selector).match(/transform:\s*([^;]+);/)?.[1].replace(/\s+/g, " ").trim();
+  for (const layer of [".qa-blob", ".qa-item"]) {
+    assert.equal(transformOf(layer), "translate(0px, 0px) scale(0.4)", `${layer} 닫힘`);
+    assert.equal(transformOf(`.qa-ring[data-open="true"] ${layer}`),
+      "translate(var(--qa-x, 0px), var(--qa-y, 0px)) scale(1)", `${layer} 열림`);
+  }
+  assert.equal(transformOf('.qa-ring[data-open="true"] .qa-blob'), transformOf('.qa-ring[data-open="true"] .qa-item'),
+    "채움과 버튼은 같은 자리로 펼쳐진다");
+  for (const selector of [".qa-blob", '.qa-ring[data-open="true"] .qa-blob']) {
+    assert.doesNotMatch(rule(selector), /--qa-origin/, `${selector}는 원점을 다시 더하지 않는다`);
+  }
+  // 채움 원은 버블마다 하나다. 진입점이 만들지 않는 가운데 원 규칙을 남기면 설계와 화면이 어긋난다.
+  assert.doesNotMatch(css, /data-qa-hub/, "가운데 원 규칙을 두지 않는다");
+  const design = readFileSync(new URL("../docs/DESIGN.md", import.meta.url), "utf8");
+  const ringDoc = design.slice(design.indexOf("## 아이오 빠른 실행 링"));
+  assert.ok(ringDoc.length > 0 && design.includes("## 아이오 빠른 실행 링"), "설계 절");
+  assert.doesNotMatch(ringDoc, /data-qa-hub|가운데 원 1개|버블 수보다 하나 많다/, "설계도 버블마다 채움 원 하나");
+  // 설계 표는 액션 ID 순서와 ko 라벨만 적고, en·zh 문구는 앱 문구 표를 원본으로 삼아 두 벌로 어긋나지 않게 한다.
+  const rows = [...ringDoc.matchAll(/^\| (\d) \| `([a-z]+)` \| ([^|]+) \|/gm)].map(([, order, id, ko]) => [order, id, ko.trim()]);
+  assert.deepEqual(rows, [["1", "calendar", "학사일정"], ["2", "graduation", "졸업 진단"],
+    ["3", "biskit", "BISKIT 추천"], ["4", "handwriting", "손글씨 입력"]]);
+  assert.doesNotMatch(ringDoc, /Academic calendar|Graduation check|学年日程|毕业审核/, "실제 화면과 다른 예전 문구");
+  assert.match(ringDoc, /--qa-label-x`·`--qa-label-y`/, "배치 함수가 라벨 자리를 넘기는 계약");
+  assert.match(rule('.qa-ring[data-open="true"] .qa-item'), /pointer-events:\s*auto/);
+
+  const label = rule(".qa-label");
+  assert.match(label, /pointer-events:\s*none/);
+  assert.match(label, /white-space:\s*nowrap/);
+  assert.match(label, /max-width:\s*calc\(100vw - 8px\)/);
+  assert.match(label, /top:\s*50%;\s*left:\s*50%;/, "라벨 기준점은 버블 중심");
+  assert.doesNotMatch(label, /bottom:/, "모든 라벨을 버블 위에 고정하지 않는다");
+  const decl = (name) => label.match(new RegExp(`--qa-label-${name}:\\s*([^;]+);`))?.[1].replace(/\s+/g, " ").trim();
+  assert.deepEqual(Object.fromEntries(["cx", "cy", "gap", "dx", "above", "side", "flip", "dy"].map((name) => [name, decl(name)])), {
+    cx: "calc(var(--qa-origin-x, 0px) + var(--qa-x, 0px))",
+    cy: "calc(var(--qa-origin-y, 0px) + var(--qa-y, 0px))",
+    gap: "calc(var(--qa-size) / 2 + 4px)",
+    // 배치 함수가 넘긴 라벨 자리(--qa-label-x·y)가 먼저이고, 방향 규칙은 값이 없을 때의 기본값이다.
+    dx: "var(--qa-label-x, calc(-50% + clamp(-50%, var(--qa-x, 0px) * 1000, 50%)))",
+    above: "calc(-1 * var(--qa-label-gap) - 100%)",
+    side: "calc(var(--qa-label-gap) + clamp(calc(-2 * var(--qa-label-gap) - 100%), var(--qa-y, 0px) * 1000, 0px))",
+    flip: "clamp(0px, calc((4px - var(--qa-label-cy) - var(--qa-label-above)) * 1000), calc(2 * var(--qa-label-gap) + 100%))",
+    dy: "var(--qa-label-y, max(var(--qa-label-side), calc(var(--qa-label-above) + var(--qa-label-flip))))",
+  });
+  const shift = label.match(/transform:\s*translate\(([\s\S]+)\);/)?.[1].replace(/\s+/g, " ").trim();
+  assert.equal(shift,
+    "clamp(calc(4px - var(--qa-label-cx)), var(--qa-label-dx), calc(100vw - 4px - var(--qa-label-cx) - 100%)), "
+      + "clamp(calc(4px - var(--qa-label-cy)), var(--qa-label-dy), calc(100dvh - 4px - var(--qa-label-cy) - 100%))",
+    "라벨은 방향에 맞는 자리에 두고 화면 네 변 4px 안으로 막는다");
+
+  // 위 선언을 그대로 옮긴 계산이다. CSS clamp(a, b, c)는 max(a, min(b, c))이고 %는 라벨 자신의 너비·높이다.
+  const clamp = (low, value, high) => Math.max(low, Math.min(value, high));
+  const labelBox = ({ cx, cy, qx, qy, w, h, vw, vh, lx, ly }) => {
+    const gap = size / 2 + 4;
+    const dx = lx ?? -w / 2 + clamp(-w / 2, qx * 1000, w / 2);
+    const above = -gap - h;
+    const side = gap + clamp(-2 * gap - h, qy * 1000, 0);
+    const flip = clamp(0, (4 - cy - above) * 1000, 2 * gap + h);
+    const dy = ly ?? Math.max(side, above + flip);
+    const left = cx + clamp(4 - cx, dx, vw - 4 - cx - w);
+    const top = cy + clamp(4 - cy, dy, vh - 4 - cy - h);
+    return { left, top, right: left + w, bottom: top + h };
+  };
+  const ringLabels = ({ ox, oy, radius, angles, widths, vw, vh }) => angles.map((angle, index) => {
+    const qx = radius * Math.cos((angle * Math.PI) / 180);
+    const qy = -radius * Math.sin((angle * Math.PI) / 180);
+    return labelBox({ cx: ox + qx, cy: oy + qy, qx, qy, w: widths[index], h: 22, vw, vh });
+  });
+  // 라벨 너비는 13px 굵은 글자 폭과 좌우 여백으로 어림했다(영어가 한국어보다 넓다).
+  const widths = { en: [78, 93, 108, 101], ko: [70, 74, 92, 86] };
+  const scenarios = [
+    // 검토 재현: 320px 낮은 화면, 왼쪽 + 중심 (50, 150), 버블 4개가 90°→0° 호. 예전에는 두 라벨이 모두 y=4px.
+    ["낮은 화면 왼쪽 +", { ox: 50, oy: 150, radius: 120, angles: [90, 60, 30, 0], vw: 320, vh: 568 }],
+    ["넓은 반원", { ox: 160, oy: 400, radius: 96, angles: [180, 120, 60, 0], vw: 320, vh: 640 }],
+    ["낮은 화면 오른쪽 +", { ox: 270, oy: 150, radius: 120, angles: [180, 150, 120, 90], vw: 320, vh: 568 }],
+  ];
+  for (const [name, scenario] of scenarios) {
+    for (const [lang, list] of Object.entries(widths)) {
+      const boxes = ringLabels({ ...scenario, widths: list });
+      // 삼각함수 좌표의 부동소수 오차(1e-13px 수준)는 화면 경계·겹침 판정에서 무시한다.
+      const eps = 1e-6;
+      for (const [index, box] of boxes.entries()) {
+        assert.ok(box.left >= 4 - eps && box.right <= scenario.vw - 4 + eps
+          && box.top >= 4 - eps && box.bottom <= scenario.vh - 4 + eps,
+        `${name} ${lang} 라벨 ${index + 1} 화면 안: ${JSON.stringify(box)}`);
+      }
+      for (let i = 0; i < boxes.length; i += 1) {
+        for (let j = i + 1; j < boxes.length; j += 1) {
+          const [a, b] = [boxes[i], boxes[j]];
+          const apart = a.right <= b.left + eps || b.right <= a.left + eps
+            || a.bottom <= b.top + eps || b.bottom <= a.top + eps;
+          assert.ok(apart, `${name} ${lang} 라벨 ${i + 1}·${j + 1}이 겹친다: ${JSON.stringify([a, b])}`);
+        }
+      }
+    }
+  }
+  // 배치 함수가 라벨 자리를 넘기면 방향 규칙 대신 그 값을 쓰고, 화면 안이면 그대로 둔다.
+  // 예: 버블이 한 줄로 놓인 320×180 화면에서 배치 함수가 라벨을 위·아래 두 줄로 나눈 경우.
+  assert.deepEqual(labelBox({ cx: 170, cy: 85, qx: 120, qy: 0, w: 93, h: 22, vw: 320, vh: 180, lx: -46.5, ly: -50 }),
+    { left: 123.5, top: 35, right: 216.5, bottom: 57 });
+  // 넘긴 자리가 화면 밖이면 화면 네 변 4px 안으로만 막는다.
+  assert.deepEqual(labelBox({ cx: 290, cy: 85, qx: 240, qy: 0, w: 101, h: 22, vw: 320, vh: 180, lx: -50.5, ly: 28 }),
+    { left: 215, top: 113, right: 316, bottom: 135 });
+  // 위쪽 공간이 넉넉한 맨 위 버블 라벨은 버블 위 4px 가운데 정렬 그대로다.
+  assert.deepEqual(labelBox({ cx: 160, cy: 300, qx: 0, qy: -100, w: 70, h: 22, vw: 320, vh: 640 }),
+    { left: 125, top: 250, right: 195, bottom: 272 });
+  assert.match(css, /html\[data-theme="neumorphic"\] \.qa-label\s*\{\s*box-shadow:\s*var\(--shadow-raised\)/);
+
+  // 라벨·아이콘·경계 대비를 라이트·명시 다크·시스템 다크 모두에서 확인한다.
+  const ink = label.match(/color:\s*(var\(--[\w-]+\))/)?.[1];
+  const face = label.match(/background:\s*(var\(--[\w-]+\))/)?.[1];
+  for (const [mode, resolve] of palettes()) {
+    assertContrast(resolve(ink), resolve(face), 4.5, `${mode} label`);
+    assertContrast(resolve("var(--color-on-accent)"), resolve("var(--color-school-blue)"), 4.5, `${mode} icon on blob`);
+    for (const back of ["var(--color-paper)", "var(--color-surface)", "var(--surface-card)"]) {
+      assertContrast(resolve("var(--color-school-blue)"), resolve(back), 3, `${mode} blob on ${back}`);
+      assertContrast(resolve("var(--color-control-border)"), resolve(back), 3, `${mode} bubble edge on ${back}`);
+    }
+  }
+});
+
+// 빠른 실행 링의 동작 모듈(quick-actions.mjs)은 다른 작업이 만든다. 결합된 체크아웃에서만 이 스타일과의 계약을 검사한다.
+function integratedQuickActions(t) {
+  const url = new URL("../web/assets/quick-actions.mjs", import.meta.url);
+  if (existsSync(url)) return readFileSync(url, "utf8");
+  t.skip("빠른 실행 링 동작 모듈이 아직 이 체크아웃에 합쳐지지 않았음");
+  return null;
+}
+
+// 동작 작업의 배치 모듈(quick-actions.mjs)이 이 스타일의 라벨 자리 계약을 지키는지 결합 체크아웃에서 본다.
+// 셸 캐시 판은 동작 작업의 sw.js와 pwa 테스트가 맡는다. 두 PR은 연달아 병합되고 그 사이 배포가 없으므로,
+// 이 파일에서 특정 PR의 캐시 판 번호를 기준으로 삼지 않는다.
+test("통합 빠른 실행 링: 배치 함수가 라벨 자리를 .qa-item에 넘긴다", (t) => {
+  const source = integratedQuickActions(t);
+  if (source === null) return;
+  // CSS 기본 라벨 규칙은 호 배치용이다. 320×180 화면처럼 버블이 한 줄로 놓이면 라벨 줄은 배치 함수만 나눌 수 있으므로,
+  // 결합본은 라벨 좌표를 실제로 넘겨야 한다(좌표를 직접 넣는 스타일 테스트로는 전달 누락을 잡지 못한다).
+  assert.match(source, /\.setProperty\(/, "CSS 변수를 style.setProperty로 넘긴다");
+  for (const name of ["--qa-label-x", "--qa-label-y"]) {
+    assert.match(source, new RegExp(`["'\`]${name}["'\`]`), `${name}를 넘긴다`);
+  }
+});
+
+test("빠른 실행 링: 전환은 300ms 미만 ease-out이고 움직임 줄이기에서 꺼진다", () => {
+  const { block, rule } = qaCss();
+  const durations = [...block.matchAll(/(\d+(?:\.\d+)?)(ms|s)\b/g)].map(([, n, unit]) => Number(n) * (unit === "s" ? 1000 : 1));
+  assert.ok(durations.length >= 2, "링 전환 시간");
+  for (const ms of durations) assert.ok(ms > 0 && ms < 300, `${ms}ms`);
+
+  const ease = rule(".qa-ring").match(/--qa-ease:\s*cubic-bezier\(([^)]+)\)/)?.[1].split(",").map(Number);
+  assert.ok(ease?.length === 4, "--qa-ease");
+  const [x1, y1, , y2] = ease;
+  assert.ok(x1 < y1 && y2 === 1, "처음이 빠르고 끝이 느린 ease-out 곡선");
+  for (const [, timing] of block.matchAll(/transition:\s*([^;]+);/g)) {
+    if (timing.trim() === "none") continue;
+    for (const part of timing.split(",")) assert.match(part, /var\(--qa-ease\)|ease-out/, part);
+  }
+
+  const reduced = [...block.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/g)].map(([, body]) => body).join("\n");
+  assert.match(reduced, /\.qa-goo,\s*\.qa-blob,\s*\.qa-item\s*\{\s*transition:\s*none;/);
 });
 
 test("음각양각은 카드와 탭에 볼록한 그림자, 입력과 선택 상태에 오목한 그림자를 준다", () => {
