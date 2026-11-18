@@ -95,43 +95,53 @@ function deferred() {
 }
 
 // ---- 명백히 가상인 진단 응답. 실제 학번·학점·규정이 아니다. ----
+// 서버 계약 모양: 요건 배열 items[]와 각 항목의 details.current·details.required, 객체형 biskit_recommendations.programs[]
 const D02 = {
-  total: { earned: 12, required: 77 },
   status: "가상 진행 중",
   eligible: false,
-  categories: [
-    { name: "가상 영역 나", earned: 5, required: 9, status: "가상 부족", met: false },
-    { name: "가상 영역 가", earned: 7, required: 7, status: "가상 충족", met: true },
+  items: [
+    {
+      id: "total_credits",
+      name: "총 이수학점",
+      status: "unmet",
+      details: { current: 12, required: 77 },
+      basis: { document: "가상 학칙", article: "제0조(가상)", snippet: "가상 인용 문장", url: "https://example.invalid/rule" },
+    },
+    { id: "virtual_b", name: "가상 영역 나", status: "미충족", details: { current: 5, required: 9 }, message: "가상 설명 둘", url: "https://example.invalid/u2" },
+    { id: "virtual_a", name: "가상 영역 가", status: "met", details: { current: 7, required: 7 } },
   ],
-  unmet: [
-    { title: "가상 요건 둘", detail: "가상 설명 둘", category: "가상 영역 나", url: "https://example.invalid/u2" },
-    { title: "가상 요건 하나", detail: "가상 설명 하나" },
-  ],
-  evidence: [
-    { document: "가상 학칙", article: "제0조(가상)", snippet: "가상 인용 문장", url: "https://example.invalid/rule" },
-  ],
-  biskit: [
-    { title: "가상 비교과 다", detail: "가상 추천 이유", url: "https://example.invalid/b3" },
-    { title: "가상 비교과 가", url: "https://example.invalid/b1" },
-  ],
+  biskit_recommendations: {
+    message: "가상 추천 안내",
+    programs: [
+      { title: "가상 비교과 다", description: "가상 추천 이유", url: "https://example.invalid/b3" },
+      { name: "가상 비교과 가", url: "https://example.invalid/b1" },
+    ],
+  },
 };
 
+// 분자가 분모보다 큼, 상태 객체, details 안의 근거, 빈 추천
 const D03 = {
-  total: { earned: 999, required: 100 },
   status: { label: "가상 충족", met: true },
-  categories: [{ name: "가상 영역", earned: 50, required: 40, status: "가상 충족", met: true }],
-  unmet: [],
-  evidence: [{ document: "가상 규정", article: "제1조", snippet: "", url: "https://example.invalid/r1" }],
-  biskit: [],
+  items: [
+    { id: "total_credits", name: "총 이수학점", passed: true, details: { current: 999, required: 100 } },
+    {
+      name: "가상 영역",
+      status: "가상 충족",
+      details: { current: 50, required: 40, evidence: [{ document: "가상 규정", article: "제1조", url: "https://example.invalid/r1" }] },
+    },
+  ],
+  biskit_recommendations: { programs: [] },
 };
 
-// 다른 키 후보(snake_case)와 문자열 숫자, 0 분모
+// summary 속 상태, 문자열 숫자, 0 분모, 불리언 상태, 문자열 근거, 배열형 추천
 const D04 = {
-  total_credits: { completed: "0.5", required: 0 },
-  status_label: "가상 확인 필요",
-  areas: [{ area: "가상 영역 하나", completed: "0.5" }],
-  unmet_requirements: ["가상 문자열 요건"],
-  basis: [{ title: "가상 지침", clause: "제9조", text: "가상 근거 문장" }],
+  summary: { status: "가상 확인 필요" },
+  items: [
+    { key: "TOTAL", name: "가상 합계", details: { current: "0.5", required: 0 } },
+    { name: "가상 영역 하나", details: { current: "0.5" } },
+    { name: "가상 문자열 요건", status: false, message: "가상 설명" },
+  ],
+  evidence: ["가상 지침 제9조"],
   biskit_recommendations: [{ name: "가상 비교과 하나", description: "가상 설명" }],
 };
 
@@ -212,14 +222,27 @@ test("safeLink는 https만 남기고 http·javascript·상대 경로·공백은 
   }
 });
 
-test("normalizeDiagnosis: 총학점이 없으면 형식 오류, 130 같은 기본값을 채우지 않는다", () => {
+test("normalizeDiagnosis: 요건 항목이 없으면 형식 오류, 졸업 학점 기본값을 채우지 않는다", () => {
   assert.throws(() => normalizeDiagnosis(null), TypeError);
   assert.throws(() => normalizeDiagnosis([]), TypeError);
-  assert.throws(() => normalizeDiagnosis({ categories: [] }), TypeError);
-  const d = normalizeDiagnosis({ total: { earned: 3 } });
+  assert.throws(() => normalizeDiagnosis({ items: [] }), TypeError);
+  assert.throws(() => normalizeDiagnosis({ nonsense: true }), TypeError);
+  const d = normalizeDiagnosis({ items: [{ id: "total_credits", name: "총 이수학점", details: { current: 3 } }] });
   assert.equal(d.total.earned.text, "3");
   assert.equal(d.total.required, null);
-  assert.deepEqual([d.categories, d.unmet, d.evidence, d.recommendations], [[], [], [], []]);
+  assert.deepEqual([d.unmet, d.evidence, d.recommendations], [[], [], []]);
+});
+
+test("normalizeDiagnosis: 명세 구조의 items[].details와 biskit_recommendations.programs를 읽는다", () => {
+  const d = normalizeDiagnosis(structuredClone(D02));
+  assert.deepEqual([d.total.earned.value, d.total.required.value], [12, 77]);
+  assert.deepEqual(d.items.map((item) => [item.name, item.current?.text, item.required?.text, item.status.met]), [
+    ["총 이수학점", "12", "77", false], ["가상 영역 나", "5", "9", false], ["가상 영역 가", "7", "7", true],
+  ]);
+  assert.deepEqual(d.unmet.map((item) => item.name), ["총 이수학점", "가상 영역 나"]);
+  assert.deepEqual(d.evidence.map((e) => [e.owner, e.document, e.article]), [["총 이수학점", "가상 학칙", "제0조(가상)"]]);
+  assert.deepEqual(d.recommendations.map((r) => r.title), ["가상 비교과 다", "가상 비교과 가"]);
+  assert.equal(d.recommendNote, "가상 추천 안내");
 });
 
 // ---- 화면 ----
@@ -241,7 +264,8 @@ test("가상 d02: 서버 배열 순서대로 영역·미충족·근거·BISKIT �
   assert.ok(calls[0].options.signal instanceof AbortSignal);
   assert.equal(q.status().hidden, true);
   assert.equal(q.result().hidden, false);
-  assert.deepEqual(q.sections(), ["total", "categories", "unmet", "evidence", "recommendations"]);
+  assert.equal(view.state, "ready", "명세 구조 응답이 형식 오류로 빠지지 않는다");
+  assert.deepEqual(q.sections(), ["total", "items", "unmet", "evidence", "recommendations"]);
 
   // 총학점: 분모는 서버 값(77), 숫자는 그대로
   assert.equal(q.total().textContent, "12 / 77학점");
@@ -250,21 +274,25 @@ test("가상 d02: 서버 배열 순서대로 영역·미충족·근거·BISKIT �
   assert.equal(q.value().getAttribute("stroke-dasharray"), `${Number(((12 / 77) * 100).toFixed(2))} 100`);
   assert.equal(q.value().getAttribute("pathLength"), "100");
 
-  // 상태: 전체 + 영역별, 충족 여부를 data-met으로
+  // 상태: 전체 + 항목별, 충족 여부를 data-met으로. 영어 코드만 우리말로 바꾼다.
   assert.deepEqual(q.badges().map((b) => [b.textContent, b.getAttribute("data-met")]), [
-    ["가상 진행 중", "unmet"], ["가상 부족", "unmet"], ["가상 충족", "met"],
+    ["가상 진행 중", "unmet"], [TEXT.unmet, "unmet"], ["미충족", "unmet"], [TEXT.met, "met"],
   ]);
 
-  assert.deepEqual(q.titles("data-grad-category"), ["가상 영역 나", "가상 영역 가"]);
-  const categories = q.all("data-grad-category");
-  assert.equal(categories[0].find((n) => n.className === "grad-item-credits").textContent, "5 / 9학점");
-  assert.equal(categories[0].find((n) => n.className === "grad-bar-fill").style.width, `${Number(((5 / 9) * 100).toFixed(2))}%`);
-  assert.deepEqual(q.titles("data-grad-unmet"), ["가상 요건 둘", "가상 요건 하나"]);
+  assert.deepEqual(q.titles("data-grad-item"), ["총 이수학점", "가상 영역 나", "가상 영역 가"]);
+  const items = q.all("data-grad-item");
+  assert.equal(items[1].find((n) => n.className === "grad-item-credits").textContent, "5 / 9학점");
+  assert.equal(items[1].find((n) => n.className === "grad-bar-fill").style.width, `${Number(((5 / 9) * 100).toFixed(2))}%`);
+  assert.deepEqual(q.titles("data-grad-unmet"), ["총 이수학점", "가상 영역 나"]);
+  assert.equal(q.all("data-grad-unmet")[1].find((n) => n.className === "grad-item-detail").textContent, "가상 설명 둘");
   assert.deepEqual(q.titles("data-grad-recommend"), ["가상 비교과 다", "가상 비교과 가"]);
+  const recSection = q.result().find((n) => n.getAttribute("data-grad-section") === "recommendations");
+  assert.ok(recSection.find((n) => n.className === "grad-notice" && n.textContent === "가상 추천 안내"));
   const evidence = q.all("data-grad-evidence");
   assert.equal(evidence.length, 1);
-  assert.equal(evidence[0].children[0].textContent, "가상 학칙 · 제0조(가상)");
-  assert.equal(evidence[0].children[1].tagName, "BLOCKQUOTE");
+  assert.equal(evidence[0].children[0].textContent, "총 이수학점", "어느 요건의 근거인지 표시한다");
+  assert.equal(evidence[0].children[1].textContent, "가상 학칙 · 제0조(가상)");
+  assert.equal(evidence[0].children[2].tagName, "BLOCKQUOTE");
 
   // 링크: 서버 순서, https, 새 창 noopener
   assert.deepEqual(q.links().map((a) => a.getAttribute("href")), [
@@ -281,33 +309,51 @@ test("가상 d03: 분자가 분모보다 커도 그래프는 100%, 숫자는 서
   await view.show("virtual-d03");
   assert.equal(q.total().textContent, "999 / 100학점");
   assert.equal(q.value().getAttribute("stroke-dasharray"), "100 100");
-  assert.deepEqual(q.sections(), ["total", "categories", "evidence"]);
-  assert.deepEqual(q.badges().map((b) => [b.textContent, b.getAttribute("data-met")]), [["가상 충족", "met"], ["가상 충족", "met"]]);
-  assert.equal(q.all("data-grad-category")[0].find((n) => n.className === "grad-bar-fill").style.width, "100%");
+  assert.deepEqual(q.sections(), ["total", "items", "evidence"], "빈 추천·미충족 구역은 그리지 않는다");
+  assert.deepEqual(q.badges().map((b) => [b.textContent, b.getAttribute("data-met")]), [
+    ["가상 충족", "met"], [TEXT.met, "met"], ["가상 충족", "met"],
+  ]);
+  assert.equal(q.all("data-grad-item")[1].find((n) => n.className === "grad-bar-fill").style.width, "100%");
+  assert.equal(q.all("data-grad-evidence")[0].children[0].textContent, "가상 영역", "details 안의 근거도 읽는다");
+  assert.deepEqual(q.links().map((a) => a.getAttribute("href")), ["https://example.invalid/r1"]);
   assert.equal(q.ask(), null, "onAsk가 없으면 묻기 버튼도 없다");
 });
 
-test("가상 d04: snake_case 키 후보·문자열 숫자·0 분모·문자열 항목도 서버 값대로 그린다", async () => {
+test("가상 d04: summary 상태·문자열 숫자·0 분모·불리언 상태·문자열 근거·배열형 추천도 서버 값대로 그린다", async () => {
   const { view, q } = mount();
   await view.show("virtual-d04");
   assert.equal(q.total().textContent, "0.5 / 0학점");
   assert.equal(q.value().getAttribute("stroke-dasharray"), "0 100");
-  assert.deepEqual(q.sections(), ["total", "categories", "unmet", "evidence", "recommendations"]);
-  assert.deepEqual(q.badges().map((b) => [b.textContent, b.getAttribute("data-met")]), [["가상 확인 필요", "unknown"]]);
-  assert.equal(q.all("data-grad-category")[0].find((n) => n.className === "grad-item-credits").textContent, "0.5학점");
-  assert.equal(q.all("data-grad-category")[0].find((n) => n.className === "grad-bar"), null, "분모가 없으면 막대도 없다");
+  assert.deepEqual(q.sections(), ["total", "items", "unmet", "evidence", "recommendations"]);
+  assert.deepEqual(q.badges().map((b) => [b.textContent, b.getAttribute("data-met")]), [
+    ["가상 확인 필요", "unknown"], [TEXT.unmet, "unmet"],
+  ]);
+  assert.deepEqual(q.titles("data-grad-item"), ["가상 합계", "가상 영역 하나", "가상 문자열 요건"]);
+  assert.equal(q.all("data-grad-item")[1].find((n) => n.className === "grad-item-credits").textContent, "0.5학점");
+  assert.equal(q.all("data-grad-item")[1].find((n) => n.className === "grad-bar"), null, "분모가 없으면 막대도 없다");
   assert.deepEqual(q.titles("data-grad-unmet"), ["가상 문자열 요건"]);
-  assert.equal(q.all("data-grad-evidence")[0].textContent, "가상 지침 · 제9조가상 근거 문장");
+  assert.equal(q.all("data-grad-evidence")[0].textContent, "가상 지침 제9조");
   assert.deepEqual(q.titles("data-grad-recommend"), ["가상 비교과 하나"]);
   assert.equal(q.links().length, 0);
 });
 
+test("총학점 항목이 없으면 형식 오류 대신 그래프만 빼고 요건을 그린다", async () => {
+  const data = { status: "가상 진행 중", items: [{ name: "가상 요건", details: { current: 1, required: 2 } }] };
+  const { view, q } = mount({ loadDiagnosis: async () => data });
+  assert.equal(await view.show("virtual-x"), "ready");
+  assert.equal(q.circles().length, 0);
+  assert.equal(q.total(), null);
+  assert.equal(q.result().find((n) => n.getAttribute("data-grad-section") === "total").children[0].textContent, TEXT.summaryTitle);
+  assert.deepEqual(q.titles("data-grad-item"), ["가상 요건"]);
+});
+
 test("http·javascript·상대 경로 링크는 a로 만들지 않고 글자로만 둔다, 서버 글자는 태그가 되지 않는다", async () => {
   const data = {
-    total: { earned: 1, required: 2 },
-    unmet: [{ title: "<img src=x onerror=alert(1)>", url: "javascript:alert(1)" }],
+    items: [{ name: "<img src=x onerror=alert(1)>", status: "unmet", url: "javascript:alert(1)", details: { current: 1, required: 2 } }],
     evidence: [{ document: "가상 규정", url: "http://example.invalid/x" }],
-    biskit: [{ title: "가상 비교과", url: "/relative/path" }, { title: "가상 비교과 둘", url: "https://example.invalid/ok" }],
+    biskit_recommendations: {
+      programs: [{ title: "가상 비교과", url: "/relative/path" }, { title: "가상 비교과 둘", url: "https://example.invalid/ok" }],
+    },
   };
   const { view, q, root } = mount({ loadDiagnosis: async () => data });
   await view.show("virtual-x");
