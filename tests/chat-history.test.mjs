@@ -1,140 +1,167 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { test } from "node:test";
 import { createChatHistory } from "../web/assets/chat-history.mjs";
 
+const V1 = "aio.chat.history.v1";
+const V2 = "aio.chat.history.v2";
 const empty = { sessionId: null, turns: [] };
-
 function fakeStorage() {
   const entries = new Map();
   return {
     entries,
-    getItem(key) {
-      return entries.get(key) ?? null;
-    },
-    setItem(key, value) {
-      entries.set(key, value);
-    },
-    removeItem(key) {
-      entries.delete(key);
-    },
+    getItem: (key) => entries.get(key) ?? null,
+    setItem: (key, value) => entries.set(key, value),
+    removeItem: (key) => entries.delete(key),
   };
 }
-
-function completedTurn(overrides = {}) {
+function snapshot(overrides = {}) {
   return {
-    message: "가상 질문",
-    status: "done",
-    answer: "가상 답변",
-    thinking: "가상 생각 원문",
-    thinkingLabel: "가상 진행 상태",
-    citations: [{
-      document: "가상 문서",
-      article: "가상 조항",
-      snippet: "테스트용 인용",
-      effectiveDate: "2099-01-01",
-      url: "https://example.test/rules",
-    }],
-    notice: "",
-    answered: true,
-    guided: false,
-    sessionId: "fake-session",
-    latencyMs: 123,
-    error: null,
+    message: "가상 질문", mode: "deep", lang: "en", answer: "가상 답변",
+    thinkingLabel: "완료 상태", citations: [{ document: "가상 문서", article: "가상 조항",
+      snippet: "가상 인용", effectiveDate: "2099-01-01", url: "https://example.test/rules" }],
+    notice: "가상 안내", answered: true, guided: false, sessionId: "fake-session", latencyMs: 123,
     ...overrides,
   };
 }
+const turn = (...versions) => ({ selectedVersion: versions.length - 1, versions });
+const state = (...turns) => ({ sessionId: "fake-session", turns });
+const denied = () => { throw new DOMException("Fake storage unavailable", "SecurityError"); };
 
-test("stores and restores only completed turns, with answer, citations and guidance", () => {
-  const storage = fakeStorage();
-  const answered = completedTurn();
-  const guided = completedTurn({
-    message: "가상 안내 질문",
-    notice: "가상 안내",
-    citations: [],
-    answered: true,
-    guided: true,
-  });
-  const history = createChatHistory({ storage });
-  assert.deepEqual(history.load(), empty);
-  assert.equal(history.save({
-    sessionId: "fake-session",
-    turns: [answered, completedTurn({ status: "streaming" }), guided, completedTurn({ status: "failed" })],
-  }), true);
-
-  assert.equal(storage.entries.size, 1);
-  const [key, serialized] = [...storage.entries][0];
-  assert.match(key, /\.v1$/);
-  assert.equal(Object.hasOwn(JSON.parse(serialized).turns[0], "thinking"), false);
-  assert.deepEqual(createChatHistory({ storage }).load(), {
-    sessionId: "fake-session",
-    turns: [{ ...answered, thinking: "" }, { ...guided, thinking: "" }],
-  });
-  assert.equal(history.clear(), true);
-  assert.deepEqual(history.load(), empty);
-});
-
-test("recovers from broken JSON and blocked storage", () => {
+test("round trips versions, selected question, answer, citations and metadata without raw thinking", () => {
   const storage = fakeStorage();
   const history = createChatHistory({ storage });
-  history.save(empty);
-  const [key] = storage.entries.keys();
-  storage.setItem(key, "{");
   assert.deepEqual(history.load(), empty);
-  assert.equal(history.save(empty), true);
-
-  const denied = () => { throw new DOMException("Fake storage unavailable", "SecurityError"); };
-  const blockedHistory = createChatHistory({
-    storage: { getItem: denied, setItem: denied, removeItem: denied },
-  });
-  assert.deepEqual(blockedHistory.load(), empty);
-  assert.equal(blockedHistory.save(empty), false);
-  assert.equal(blockedHistory.clear(), false);
+  const first = snapshot();
+  const second = snapshot({ message: "수정한 가상 질문", answer: "새 가상 답변", lang: "zh" });
+  const input = state(turn({ ...first, status: "done", thinking: "가상 생각 원문", error: null }, second));
+  assert.equal(history.save(input), true);
+  assert.deepEqual(history.load(), state(turn(first, second)));
+  const saved = JSON.parse(storage.getItem(V2));
+  assert.deepEqual(Object.keys(saved.turns[0].versions[0]), Object.keys(first));
+  input.turns[0].selectedVersion = 0;
+  assert.equal(history.save(input), true);
+  assert.equal(createChatHistory({ storage }).load().turns[0].selectedVersion, 0);
+  assert.equal(input.turns[0].versions[0].thinking, "가상 생각 원문");
 });
 
-test("drops the oldest turns on quota errors and preserves the caller's history", () => {
+test("migrates only completed v1 turns and removes v1 after writing v2", () => {
+  const storage = fakeStorage();
+  const first = snapshot();
+  const old = snapshot();
+  delete old.mode;
+  delete old.lang;
+  storage.setItem(V1, JSON.stringify(state({ ...first, status: "done", thinking: "가상 생각" },
+    { ...old, status: "done" }, { ...first, status: "streaming" }, { ...first, status: "failed" })));
+  const expected = state(turn(first), turn(snapshot({ mode: "fast", lang: "ko" })));
+  assert.deepEqual(createChatHistory({ storage }).load(), expected);
+  assert.equal(storage.getItem(V1), null);
+  assert.deepEqual(JSON.parse(storage.getItem(V2)), expected);
+});
+
+test("returns all migrated turns and retains v1 when storage fails, even after quota trimming", () => {
+  for (const name of ["SecurityError", "QuotaExceededError"]) {
+    const storage = fakeStorage();
+    const legacy = JSON.stringify(state({ ...snapshot(), status: "done" }, { ...snapshot(), status: "done" }));
+    storage.setItem(V1, legacy);
+    storage.setItem = () => { throw new DOMException("Fake failure", name); };
+    assert.deepEqual(createChatHistory({ storage }).load(), state(turn(snapshot()), turn(snapshot())));
+    assert.equal(storage.getItem(V1), legacy);
+    assert.equal(storage.getItem(V2), null);
+  }
+});
+
+test("existing empty or corrupt v2 never revives v1", () => {
+  for (const current of ["", "{", "null", "{}", JSON.stringify(empty)]) {
+    const storage = fakeStorage();
+    storage.setItem(V1, JSON.stringify(state({ ...snapshot(), status: "done" })));
+    storage.setItem(V2, current);
+    assert.deepEqual(createChatHistory({ storage }).load(), empty);
+    assert.equal(storage.getItem(V2), current);
+  }
+});
+
+test("filters invalid versions, remaps selection and clamps malformed indices", () => {
+  const storage = fakeStorage();
+  const history = createChatHistory({ storage });
+  const a = snapshot();
+  const b = snapshot({ message: "두 번째 가상 질문" });
+  const versions = [null, a, { ...a, status: "streaming" }, b, { message: 12 }];
+  const cases = [[3, 1], [2, 0], [99, 1], [-1, 0], [1.5, 0], ["3", 0]];
+  for (const [selectedVersion, expected] of cases) {
+    storage.setItem(V2, JSON.stringify(state(null, { versions: [] }, { selectedVersion, versions })));
+    assert.deepEqual(history.load(), state({ selectedVersion: expected, versions: [a, b] }));
+  }
+  assert.equal(history.save(state(turn({ ...a, status: "failed" }, { ...a, status: "fallback" }))), true);
+  assert.deepEqual(history.load().turns, []);
+});
+
+test("normalizes fields, guidance and citation links and drops unapproved properties", () => {
+  const storage = fakeStorage();
+  const history = createChatHistory({ storage });
+  const citation = { ...snapshot().citations[0], url: "http://example.test/" };
+  history.save({ sessionId: 12, turns: [turn(snapshot({ mode: "invalid", lang: "invalid", sessionId: 12,
+    latencyMs: Infinity, citations: [null, citation], thinking: "가상 원문" })),
+  turn(snapshot({ answered: false })), turn(snapshot({ guided: true }))] });
+  const loaded = history.load();
+  assert.equal(loaded.sessionId, null);
+  const saved = loaded.turns[0].versions[0];
+  assert.equal(saved.mode, "fast");
+  assert.equal(saved.lang, "ko");
+  assert.equal(saved.sessionId, null);
+  assert.equal(saved.latencyMs, null);
+  assert.equal(Object.hasOwn(saved, "thinking"), false);
+  assert.deepEqual(loaded.turns.map((t) => t.versions[0].citations), [[{ ...citation, url: null }], [], []]);
+});
+
+test("quota drops whole oldest turns without mutating versions or caller state", () => {
   const storage = fakeStorage();
   const attempts = [];
+  const write = storage.setItem;
   let quotaAvailable = true;
-  const history = createChatHistory({ storage: {
-    ...storage,
-    setItem(key, serialized) {
-      const { turns } = JSON.parse(serialized);
-      attempts.push(turns.length);
-      if (!quotaAvailable || turns.length > 1) throw new DOMException("Fake quota", "QuotaExceededError");
-      storage.setItem(key, serialized);
-    },
-  } });
-  const state = {
-    sessionId: "fake-session",
-    turns: ["가상 질문 1", "가상 질문 2", "가상 질문 3"].map((message) => completedTurn({ message })),
+  storage.setItem = (key, serialized) => {
+    const { turns } = JSON.parse(serialized);
+    attempts.push(turns.length);
+    if (!quotaAvailable || turns.length > 1) throw new DOMException("Fake quota", "QuotaExceededError");
+    write(key, serialized);
   };
-  assert.equal(history.save(state), true);
+  const history = createChatHistory({ storage });
+  const input = state(turn(snapshot()), turn(snapshot()), turn(snapshot(), snapshot({ message: "수정 질문" })));
+  const before = structuredClone(input);
+  assert.equal(history.save(input), true);
   assert.deepEqual(attempts, [3, 2, 1]);
-  assert.equal(state.turns.length, 3);
-  assert.deepEqual(history.load().turns.map((turn) => turn.message), ["가상 질문 3"]);
-
+  assert.deepEqual(input, before);
+  assert.deepEqual(history.load(), state(input.turns[2]));
   quotaAvailable = false;
-  assert.equal(history.save({ ...state, turns: state.turns.slice(0, 1) }), false);
+  assert.equal(history.save(state(input.turns[0])), false);
   assert.deepEqual(attempts, [3, 2, 1, 1, 0]);
-  assert.deepEqual(history.load().turns.map((turn) => turn.message), ["가상 질문 3"]);
+  assert.deepEqual(history.load(), state(input.turns[2]));
 });
 
-test("normalizes malformed saved fields and only restores HTTPS citation links", () => {
+test("successful v2 stays authoritative when legacy cleanup fails; clear attempts both keys", () => {
   const storage = fakeStorage();
+  storage.setItem(V1, JSON.stringify(state({ ...snapshot(), status: "done" })));
+  const remove = storage.removeItem;
+  storage.removeItem = denied;
   const history = createChatHistory({ storage });
-  history.save(empty);
-  const [key] = storage.entries.keys();
-  const citation = { ...completedTurn().citations[0], url: "http://example.test/" };
-  storage.setItem(key, JSON.stringify({
-    sessionId: 12,
-    turns: [
-      null,
-      completedTurn({ citations: [null, citation] }),
-      completedTurn({ answered: false }),
-      completedTurn({ guided: true }),
-    ],
-  }));
-  const stored = history.load();
-  assert.equal(stored.sessionId, null);
-  assert.deepEqual(stored.turns.map((turn) => turn.citations), [[{ ...citation, url: null }], [], []]);
+  assert.equal(history.save(empty), true);
+  assert.deepEqual(history.load(), empty);
+  const attempts = [];
+  storage.removeItem = (key) => { attempts.push(key); if (key === V2) denied(); remove(key); };
+  assert.equal(history.clear(), false);
+  assert.deepEqual(attempts, [V2, V1]);
+  assert.equal(storage.getItem(V1), null);
+  storage.removeItem = remove;
+  storage.setItem(V1, "{}");
+  assert.equal(history.clear(), true);
+  assert.equal(storage.entries.size, 0);
+});
+
+test("handles malformed legacy JSON and blocked storage operations", () => {
+  const storage = fakeStorage();
+  storage.setItem(V1, "{");
+  assert.deepEqual(createChatHistory({ storage }).load(), empty);
+  const history = createChatHistory({ storage: { getItem: denied, setItem: denied, removeItem: denied } });
+  assert.deepEqual(history.load(), empty);
+  assert.equal(history.save(empty), false);
+  assert.equal(history.clear(), false);
 });
