@@ -206,6 +206,71 @@ test("라이트·다크 토큰의 본문과 채움 글자는 4.5:1이고 컨트�
   }
 });
 
+test("달력 분류 칩과 주말 틴트 토큰은 세 색 블록에 있고 대비를 지킨다", () => {
+  const css = read("assets/app.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const tokens = (body) => Object.fromEntries(
+    [...body.matchAll(/--color-([\w-]+):\s*([^;]+);/g)].map(([, key, value]) => [key, value.trim()]));
+  const block = (pattern) => tokens(css.match(pattern)?.[1] ?? "");
+  const light = block(/(?:^|\})\s*:root\s*\{([^{}]*)\}/);
+  const dark = { ...light, ...block(/:root\[data-color-mode="dark"\]\s*\{([^{}]*)\}/) };
+  const system = { ...light, ...block(/@media \(prefers-color-scheme: dark\)\s*\{[^{}]+\{([^{}]*)\}/) };
+  const categories = ["enroll", "exam", "holiday", "register", "other"];
+  const keys = ["cal-weekend", ...categories.flatMap((name) => [`cal-${name}-bg`, `cal-${name}-ink`])];
+  const darkOwn = block(/:root\[data-color-mode="dark"\]\s*\{([^{}]*)\}/);
+  const systemOwn = block(/@media \(prefers-color-scheme: dark\)\s*\{[^{}]+\{([^{}]*)\}/);
+  for (const key of keys) {
+    assert.ok(light[key] && darkOwn[key] && systemOwn[key], `${key} in light, dark and system dark`);
+    assert.equal(systemOwn[key], darkOwn[key], `${key} system dark matches dark`);
+  }
+  for (const [label, palette] of [["light", light], ["dark", dark], ["system", system]]) {
+    const resolve = (key) => {
+      const alias = palette[key]?.match(/^var\(--color-([\w-]+)\)$/)?.[1];
+      return alias ? resolve(alias) : palette[key]?.toUpperCase();
+    };
+    const card = resolve("raised") ?? resolve("surface");
+    for (const name of categories) {
+      assertContrast(resolve(`cal-${name}-ink`), resolve(`cal-${name}-bg`), 4.5, `${label} ${name} chip`);
+      assertContrast(resolve(`cal-${name}-ink`), card, 3, `${label} ${name} dot on card`);
+      assertContrast(resolve(`cal-${name}-ink`), resolve("cal-weekend"), 3, `${label} ${name} dot on weekend`);
+    }
+    for (const ink of ["text", "text-muted"]) {
+      assertContrast(resolve(ink), resolve("cal-weekend"), 4.5, `${label} ${ink} on weekend tint`);
+    }
+    assertContrast(resolve("school-blue"), resolve("cal-weekend"), 3, `${label} selected ring on weekend`);
+  }
+});
+
+test("달력 격자는 9% 헤어라인과 대체 경계를 쓰고 좁은 화면에서 막대 대신 점을 보인다", () => {
+  const css = read("assets/app.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const rule = (selector) => {
+    const at = css.indexOf(`${selector} {`);
+    assert.ok(at >= 0, selector);
+    return css.slice(at, css.indexOf("}", at));
+  };
+  assert.match(rule(".calendar-month"), /--calendar-line:\s*var\(--color-border\)/);
+  assert.match(css, /@supports \(color: color-mix\(in srgb, red 9%, transparent\)\)\s*\{\s*\.calendar-month\s*\{\s*--calendar-line:\s*color-mix\(in srgb, var\(--color-text\) 9%, transparent\);/);
+  assert.match(rule(".calendar-week"), /grid-template-columns:\s*repeat\(7, minmax\(0, 1fr\)\)/);
+  assert.match(rule(".calendar-bars"), /grid-template-columns:\s*repeat\(7, minmax\(0, 1fr\)\)/);
+  assert.match(rule(".calendar-bars"), /pointer-events:\s*none/, "막대는 칸 누르기를 막지 않는다");
+  assert.match(rule(".calendar-day.is-weekend"), /background:\s*var\(--color-cal-weekend\)/);
+  assert.match(rule(".calendar-day.is-outside"), /color:\s*var\(--color-text-muted\)/);
+  assert.match(css, /\.calendar-day\.is-today > [^{]+\{[^}]*background:\s*var\(--color-school-blue\);[^}]*color:\s*var\(--color-on-accent\)/);
+  assert.match(rule(".calendar-day.is-selected"), /box-shadow:\s*inset 0 0 0 2px var\(--color-school-blue\)/);
+  assert.match(css, /\.calendar-viewswitch button,\s*\.calendar-nav button \{[^}]*min-width:\s*var\(--touch\);\s*min-height:\s*var\(--touch\)/);
+  for (const name of ["enroll", "exam", "holiday", "register", "other"]) {
+    assert.match(css, new RegExp(`\\.calendar-cat-${name} \\{ --cal-bg: var\\(--color-cal-${name}-bg\\); --cal-ink: var\\(--color-cal-${name}-ink\\); \\}`));
+  }
+  const narrow = [...css.matchAll(/@media \(max-width: 600px\)\s*\{([\s\S]*?)\n\}/g)].map(([, body]) => body).join("\n");
+  assert.match(narrow, /\.calendar-bars,\s*\.calendar-more\s*\{\s*display:\s*none;/);
+  assert.match(narrow, /\.calendar-dots\s*\{\s*display:\s*flex;/);
+  assert.match(narrow, /\.calendar-day\s*\{[^}]*min-height:\s*calc\(var\(--touch\) \+ 6px\)/);
+  assert.match(rule(".calendar-dots"), /display:\s*none/, "넓은 화면에서는 점을 숨긴다");
+  const calendarAt = css.indexOf(".calendar-month {");
+  assert.ok(calendarAt < css.indexOf(".more {"), "달력 규칙은 더보기 구역 앞에 둔다");
+  assert.ok(calendarAt < css.lastIndexOf(":focus-visible"));
+  assert.doesNotMatch(css.slice(calendarAt, css.indexOf(".more {")), /gradient|backdrop-filter/);
+});
+
 test("음각양각은 카드와 탭에 볼록한 그림자, 입력과 선택 상태에 오목한 그림자를 준다", () => {
   const css = read("assets/app.css");
   const effect = css.match(/html\[data-theme="neumorphic"\]\s*\{([^{}]*)\}/)?.[1] ?? "";
