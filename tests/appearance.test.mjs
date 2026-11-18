@@ -392,9 +392,18 @@ test("빠른 실행 링: goo 필터는 아이오 화면 밖 크기 0 장식 SVG�
 test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·라벨은 필터 밖 44px 이상이다", () => {
   const { css, block, rule } = qaCss();
   assert.doesNotMatch(block, /url\(|gradient|backdrop-filter|filter:/, "CSS 필터·그라데이션·유리 효과 없음");
-  assert.match(rule(".qa-ring"), /position:\s*relative/);
-  assert.match(block, /\.qa-goo,\s*\.qa-items \{[^}]*position:\s*absolute;[^}]*top:\s*50%;[^}]*left:\s*50%/);
-  assert.match(rule(".qa-goo"), /pointer-events:\s*none/);
+  // 링은 + 버튼과 떨어진 자리(입력 행 뒤)에 붙어도 트리거 중심에서 펼쳐지도록 화면 고정 레이어에 원점 변수를 쓴다.
+  const ring = rule(".qa-ring");
+  assert.match(ring, /position:\s*fixed;\s*inset:\s*0;/);
+  assert.match(ring, /pointer-events:\s*none/, "닫힌 링 레이어가 화면 누르기를 막지 않는다");
+  assert.match(rule(".qa-items"), /top:\s*var\(--qa-origin-y, 0px\);\s*left:\s*var\(--qa-origin-x, 0px\);/);
+  // 크기 0 SVG는 그려지지 않으므로 장식 SVG는 화면 전체를 덮고, SVG 좌표를 화면 px로 쓴다.
+  const goo = rule(".qa-goo");
+  assert.match(goo, /top:\s*0;\s*left:\s*0;\s*width:\s*100%;\s*height:\s*100%;/);
+  assert.doesNotMatch(goo, /(?:^|[^-])(?:width|height):\s*0/, "장식 SVG viewport는 0이 아니다");
+  assert.match(goo, /pointer-events:\s*none/);
+  assert.match(goo, /opacity:\s*0/, "닫힌 링의 채움은 + 버튼을 가리지 않는다");
+  assert.match(rule('.qa-ring[data-open="true"] .qa-goo'), /opacity:\s*1/);
   assert.match(rule(".qa-blob"), /fill:\s*var\(--color-school-blue\)/);
 
   const size = Number(rule(".qa-ring").match(/--qa-size:\s*(\d+)px/)?.[1]);
@@ -407,11 +416,15 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
   assert.match(item, /pointer-events:\s*none/, "닫힌 버블은 누를 수 없다");
   assert.doesNotMatch(item, /outline/, "포커스는 공통 외곽선을 쓴다");
 
-  for (const layer of [".qa-blob", ".qa-item"]) {
-    assert.match(rule(layer), /transform:\s*translate\(0px, 0px\) scale\(0\.4\)/, `${layer} 닫힘`);
-    assert.match(rule(`.qa-ring[data-open="true"] ${layer}`),
-      /transform:\s*translate\(var\(--qa-x, 0px\), var\(--qa-y, 0px\)\) scale\(1\)/, `${layer} 열림`);
-  }
+  // 버튼은 원점에 놓인 .qa-items 안에서 거리만큼, 채움은 화면 좌표의 원점+거리만큼 움직인다.
+  assert.match(rule(".qa-item"), /transform:\s*translate\(0px, 0px\) scale\(0\.4\)/, "버튼 닫힘");
+  assert.match(rule('.qa-ring[data-open="true"] .qa-item'),
+    /transform:\s*translate\(var\(--qa-x, 0px\), var\(--qa-y, 0px\)\) scale\(1\)/, "버튼 열림");
+  assert.match(rule(".qa-blob"),
+    /transform:\s*translate\(var\(--qa-origin-x, 0px\), var\(--qa-origin-y, 0px\)\) scale\(0\.4\)/, "채움 닫힘");
+  assert.match(rule('.qa-ring[data-open="true"] .qa-blob'),
+    /transform:\s*translate\(calc\(var\(--qa-origin-x, 0px\) \+ var\(--qa-x, 0px\)\),\s*calc\(var\(--qa-origin-y, 0px\) \+ var\(--qa-y, 0px\)\)\) scale\(1\)/,
+    "채움 열림");
   assert.match(rule('.qa-ring[data-open="true"] .qa-item'), /pointer-events:\s*auto/);
 
   const label = rule(".qa-label");
@@ -448,7 +461,7 @@ test("빠른 실행 링: 전환은 300ms 미만 ease-out이고 움직임 줄이�
   }
 
   const reduced = [...block.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/g)].map(([, body]) => body).join("\n");
-  assert.match(reduced, /\.qa-blob,\s*\.qa-item\s*\{\s*transition:\s*none;/);
+  assert.match(reduced, /\.qa-goo,\s*\.qa-blob,\s*\.qa-item\s*\{\s*transition:\s*none;/);
 });
 
 test("음각양각은 카드와 탭에 볼록한 그림자, 입력과 선택 상태에 오목한 그림자를 준다", () => {

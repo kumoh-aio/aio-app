@@ -1541,8 +1541,10 @@ html[data-theme="neumorphic"] :is(
   }
 }
 
-/* 아이오 빠른 실행 링. .qa-ring이 + 버튼을 감싸고, 장식 레이어(.qa-goo)와 버튼 레이어(.qa-items)를
-   버튼 중심에 크기 0으로 겹쳐 둔다. --qa-x·--qa-y는 버튼 중심에서 버블 중심까지의 px 거리다.
+/* 아이오 빠른 실행 링. .qa-ring은 + 버튼과 떨어져 붙어도 되는 화면 고정 레이어다.
+   --qa-origin-x·--qa-origin-y는 + 버튼 중심의 화면 좌표(getBoundingClientRect 기준 px)이고,
+   --qa-x·--qa-y는 그 원점에서 버블 중심까지의 px 거리다.
+   장식 SVG(.qa-goo)는 화면 전체 크기라 SVG 좌표가 화면 px와 같다. 크기 0 SVG는 그려지지 않는다.
    goo 필터는 index.html의 #aio-goo를 SVG <g filter> 속성으로 걸고, 글자와 아이콘은 필터 밖 .qa-items에 둔다. */
 .qa-defs {
   position: absolute;
@@ -1555,36 +1557,44 @@ html[data-theme="neumorphic"] :is(
   --qa-size: 52px;
   --qa-duration: 240ms;
   --qa-ease: cubic-bezier(0.22, 1, 0.36, 1);
-  position: relative;
-  display: inline-flex;
-  flex: 0 0 auto;
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  pointer-events: none;
 }
 
-.qa-goo,
+.qa-goo {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease-out;
+}
+
+.qa-ring[data-open="true"] .qa-goo {
+  opacity: 1;
+}
+
 .qa-items {
   position: absolute;
-  top: 50%;
-  left: 50%;
-  z-index: 4;
+  top: var(--qa-origin-y, 0px);
+  left: var(--qa-origin-x, 0px);
   width: 0;
   height: 0;
   margin: 0;
   padding: 0;
   overflow: visible;
   list-style: none;
-}
-
-.qa-goo {
-  pointer-events: none;
-}
-
-.qa-items {
   pointer-events: none;
 }
 
 .qa-blob {
   fill: var(--color-school-blue);
-  transform: translate(0px, 0px) scale(0.4);
+  transform: translate(var(--qa-origin-x, 0px), var(--qa-origin-y, 0px)) scale(0.4);
   transition: transform var(--qa-duration) var(--qa-ease);
 }
 
@@ -1615,7 +1625,8 @@ html[data-theme="neumorphic"] :is(
 }
 
 .qa-ring[data-open="true"] .qa-blob {
-  transform: translate(var(--qa-x, 0px), var(--qa-y, 0px)) scale(1);
+  transform: translate(calc(var(--qa-origin-x, 0px) + var(--qa-x, 0px)),
+    calc(var(--qa-origin-y, 0px) + var(--qa-y, 0px))) scale(1);
 }
 
 .qa-ring[data-open="true"] .qa-item {
@@ -1646,6 +1657,7 @@ html[data-theme="neumorphic"] .qa-label {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .qa-goo,
   .qa-blob,
   .qa-item {
     transition: none;

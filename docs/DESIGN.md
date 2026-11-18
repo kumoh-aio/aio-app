@@ -173,22 +173,25 @@ Google Stitch로 만든 시안을 기준으로 한다. 내보낸 원본(HTML·�
 ### 레이어와 필터
 
 ```
-.qa-ring[data-open]            + 버튼을 감싸는 position: relative 상자
-├─ button  (+ 트리거)
-├─ svg.qa-goo  aria-hidden, pointer-events: none
+.qa-ring[data-open]  position: fixed; inset: 0, pointer-events: none
+│                    --qa-origin-x/--qa-origin-y = + 버튼 중심 화면 좌표
+├─ svg.qa-goo  화면 전체 크기, aria-hidden, pointer-events: none
 │   └─ g filter="url(#aio-goo)"
-│       ├─ circle.qa-blob  (가운데, 변수 없음)
+│       ├─ circle.qa-blob  (가운데, --qa-x/--qa-y 없음)
 │       └─ circle.qa-blob  --qa-x/--qa-y, r = 지름/2, cx=cy=0
-└─ .qa-items  role="menu"
+└─ .qa-items  role="menu", 원점(--qa-origin-x/y)에 크기 0으로 놓임
     └─ button.qa-item  role="menuitem", --qa-x/--qa-y
         ├─ 아이콘 (aria-hidden)
         └─ span.qa-label
 ```
 
+- 링은 화면 고정 레이어라 DOM에서 `+` 버튼 옆에 있을 필요가 없다(입력 행 뒤에 붙여도 된다). 배치 원점은 `+` 버튼의 `getBoundingClientRect()` 중심이고, 열 때와 화면 크기가 바뀔 때 다시 잰다.
+- 장식 SVG는 화면 전체 크기다. 크기 0인 바깥 SVG는 그려지지 않는다. SVG 좌표가 화면 px와 같으므로 채움은 `원점 + 거리`로 움직이고, 버튼은 원점에 놓인 `.qa-items` 안에서 거리만큼 움직인다.
+- 닫힌 링의 채움 레이어는 투명이라 `+` 버튼을 가리지 않는다.
 - 필터는 `index.html` 맨 끝(아이오 화면 구역 밖) 크기 0 SVG 안의 `<filter id="aio-goo" color-interpolation-filters="sRGB">`다. `feGaussianBlur stdDeviation="10"` 다음에 `feColorMatrix type="matrix"`의 알파 행 `0 0 0 19 -9`로 흐린 가장자리를 다시 날카롭게 자른다. 번진 부분이 잘리지 않게 필터 영역은 `x=-50% y=-50% width=200% height=200%`이다.
 - 필터는 SVG `<g filter>` 속성으로만 건다. CSS `filter: url()`은 쓰지 않는다. 필터를 정의한 SVG는 `display: none`으로 숨기지 않는다(일부 브라우저가 참조를 잃는다).
 - 버튼·아이콘·라벨은 필터 밖 `.qa-items`에 둬 글자가 번지지 않는다.
-- `--qa-x`·`--qa-y`는 `+` 중심에서 버블 중심까지의 거리이고 단위 `px`를 붙여 `style.setProperty`로 넘긴다. 위쪽은 음수 `--qa-y`다.
+- `--qa-origin-x`·`--qa-origin-y`는 `.qa-ring`에, `--qa-x`·`--qa-y`는 버블마다(`.qa-blob`과 `.qa-item` 둘 다) 단위 `px`를 붙여 `style.setProperty`로 넘긴다. `--qa-x`·`--qa-y`는 원점에서 버블 중심까지의 거리이고, 위쪽은 음수 `--qa-y`다.
 
 ### 키·포커스
 
