@@ -1541,6 +1541,117 @@ html[data-theme="neumorphic"] :is(
   }
 }
 
+/* 아이오 빠른 실행 링. .qa-ring이 + 버튼을 감싸고, 장식 레이어(.qa-goo)와 버튼 레이어(.qa-items)를
+   버튼 중심에 크기 0으로 겹쳐 둔다. --qa-x·--qa-y는 버튼 중심에서 버블 중심까지의 px 거리다.
+   goo 필터는 index.html의 #aio-goo를 SVG <g filter> 속성으로 걸고, 글자와 아이콘은 필터 밖 .qa-items에 둔다. */
+.qa-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.qa-ring {
+  --qa-size: 52px;
+  --qa-duration: 240ms;
+  --qa-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  position: relative;
+  display: inline-flex;
+  flex: 0 0 auto;
+}
+
+.qa-goo,
+.qa-items {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  z-index: 4;
+  width: 0;
+  height: 0;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  list-style: none;
+}
+
+.qa-goo {
+  pointer-events: none;
+}
+
+.qa-items {
+  pointer-events: none;
+}
+
+.qa-blob {
+  fill: var(--color-school-blue);
+  transform: translate(0px, 0px) scale(0.4);
+  transition: transform var(--qa-duration) var(--qa-ease);
+}
+
+.qa-item {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: grid;
+  place-items: center;
+  width: var(--qa-size);
+  height: var(--qa-size);
+  min-width: var(--touch);
+  min-height: var(--touch);
+  margin: calc(var(--qa-size) / -2) 0 0 calc(var(--qa-size) / -2);
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--color-control-border);
+  border-radius: 50%;
+  color: var(--color-on-accent);
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(0px, 0px) scale(0.4);
+  transition: transform var(--qa-duration) var(--qa-ease), opacity 160ms ease-out;
+}
+
+.qa-ring[data-open="true"] .qa-blob {
+  transform: translate(var(--qa-x, 0px), var(--qa-y, 0px)) scale(1);
+}
+
+.qa-ring[data-open="true"] .qa-item {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(var(--qa-x, 0px), var(--qa-y, 0px)) scale(1);
+}
+
+.qa-label {
+  position: absolute;
+  bottom: calc(100% + 4px);
+  left: 50%;
+  padding: 2px 8px;
+  background: var(--surface-card);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-text);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+  white-space: nowrap;
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+html[data-theme="neumorphic"] .qa-label {
+  box-shadow: var(--shadow-raised);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qa-blob,
+  .qa-item {
+    transition: none;
+  }
+}
+
 /* 키보드 포커스. box-shadow는 카드·타일 그림자에 덮이므로 outline을 쓰고 파일 맨 끝에 둔다.
    이 규칙 뒤에 outline이나 포커스 규칙을 더하지 않는다. */
 :focus-visible {

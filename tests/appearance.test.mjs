@@ -313,6 +313,144 @@ test("통합 달력 보기: 격자 첫 행에 일~토 요일 머리를 그린다
   assert.match(source, /["']columnheader["']/);
 });
 
+// ---- 아이오 빠른 실행 링 ----
+
+function qaCss() {
+  const css = read("assets/app.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const start = css.indexOf(".qa-defs {");
+  const end = css.lastIndexOf(":focus-visible");
+  assert.ok(start > 0 && start < end, "빠른 실행 링 규칙은 마지막 포커스 규칙 앞에 둔다");
+  const block = css.slice(start, end);
+  const rule = (selector) => {
+    const at = block.indexOf(`${selector} {`);
+    assert.ok(at >= 0, selector);
+    return block.slice(at, block.indexOf("}", at));
+  };
+  return { css, block, rule };
+}
+
+function palettes() {
+  const css = read("assets/app.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  const tokens = (body) => Object.fromEntries(
+    [...body.matchAll(/--([\w-]+):\s*([^;]+);/g)].map(([, key, value]) => [key, value.trim()]));
+  const block = (pattern) => tokens(css.match(pattern)?.[1] ?? "");
+  const light = block(/(?:^|\})\s*:root\s*\{([^{}]*)\}/);
+  const dark = { ...light, ...block(/:root\[data-color-mode="dark"\]\s*\{([^{}]*)\}/) };
+  const system = { ...light, ...block(/@media \(prefers-color-scheme: dark\)\s*\{[^{}]+\{([^{}]*)\}/) };
+  return [["light", light], ["dark", dark], ["system", system]].map(([label, palette]) => {
+    const resolve = (value) => {
+      const alias = value?.match(/^var\(--([\w-]+)\)$/)?.[1];
+      return alias ? resolve(palette[alias]) : value?.toUpperCase();
+    };
+    return [label, resolve];
+  });
+}
+
+test("빠른 실행 링: goo 필터는 아이오 화면 밖 크기 0 장식 SVG에 정해진 값으로 있다", () => {
+  const html = read("index.html");
+  const svgs = [...html.matchAll(/<svg\b([^>]*)>([\s\S]*?)<\/svg>/g)];
+  const defs = svgs.filter(([, , body]) => body.includes('id="aio-goo"'));
+  assert.equal(defs.length, 1, "필터 정의는 한 곳");
+  const [whole, attrs, body] = defs[0];
+  assert.match(attrs, /\baria-hidden="true"/);
+  assert.match(attrs, /\bwidth="0"/);
+  assert.match(attrs, /\bheight="0"/);
+  assert.doesNotMatch(whole, /\sstyle\s*=|xmlns|https?:|href/i, "style 속성·외부 주소 없음");
+
+  const at = html.indexOf(whole);
+  assert.ok(at > html.indexOf("</main>") && at > html.indexOf("</nav>"), "아이오 화면 구역과 탭 막대 밖");
+  assert.ok(at < html.indexOf("</body>"), "</body> 바로 앞");
+  const aio = html.match(/<section class="view" data-view="aio"[\s\S]*?<\/section>/)?.[0] ?? "";
+  assert.doesNotMatch(aio, /aio-goo|<svg/, "아이오 화면 구역 마크업은 그대로");
+
+  const filter = body.match(/<filter\b([^>]*)>([\s\S]*?)<\/filter>/);
+  assert.ok(filter, "filter 요소");
+  const filterAttrs = Object.fromEntries([...filter[1].matchAll(/([\w-]+)="([^"]*)"/g)].map(([, k, v]) => [k, v]));
+  assert.equal(filterAttrs.id, "aio-goo");
+  assert.equal(filterAttrs["color-interpolation-filters"], "sRGB");
+  // 흐림이 번지는 3σ(30px)만큼 잘리지 않도록 경계 상자 바깥까지 필터 영역을 넓힌다.
+  assert.deepEqual([filterAttrs.x, filterAttrs.y, filterAttrs.width, filterAttrs.height], ["-50%", "-50%", "200%", "200%"]);
+
+  const primitives = [...filter[2].matchAll(/<(fe\w+)\b([^>]*)\/?>/g)].map(([, name, rest]) => [name,
+    Object.fromEntries([...rest.matchAll(/([\w-]+)="([^"]*)"/g)].map(([, k, v]) => [k, v]))]);
+  assert.deepEqual(primitives.map(([name]) => name), ["feGaussianBlur", "feColorMatrix"]);
+  const [[, blur], [, matrix]] = primitives;
+  assert.equal(Number(blur.stdDeviation), 10);
+  assert.equal(matrix.type, "matrix");
+  assert.equal(matrix.in, blur.result, "흐린 결과에 알파 행렬을 건다");
+  const values = matrix.values.trim().split(/\s+/).map(Number);
+  assert.equal(values.length, 20);
+  assert.deepEqual(values.slice(0, 15), [1, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 1, 0, 0], "색 채널은 그대로");
+  assert.deepEqual(values.slice(15), [0, 0, 0, 19, -9], "알파 행");
+
+  // 필터 정의 SVG를 display: none으로 숨기면 일부 브라우저가 참조를 잃는다.
+  const { rule } = qaCss();
+  assert.doesNotMatch(rule(".qa-defs"), /display:\s*none/);
+  assert.match(rule(".qa-defs"), /position:\s*absolute/);
+});
+
+test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·라벨은 필터 밖 44px 이상이다", () => {
+  const { css, block, rule } = qaCss();
+  assert.doesNotMatch(block, /url\(|gradient|backdrop-filter|filter:/, "CSS 필터·그라데이션·유리 효과 없음");
+  assert.match(rule(".qa-ring"), /position:\s*relative/);
+  assert.match(block, /\.qa-goo,\s*\.qa-items \{[^}]*position:\s*absolute;[^}]*top:\s*50%;[^}]*left:\s*50%/);
+  assert.match(rule(".qa-goo"), /pointer-events:\s*none/);
+  assert.match(rule(".qa-blob"), /fill:\s*var\(--color-school-blue\)/);
+
+  const size = Number(rule(".qa-ring").match(/--qa-size:\s*(\d+)px/)?.[1]);
+  assert.ok(size >= 44, `버블 지름 ${size}px`);
+  const item = rule(".qa-item");
+  assert.match(item, /width:\s*var\(--qa-size\);\s*height:\s*var\(--qa-size\)/);
+  assert.match(item, /min-width:\s*var\(--touch\);\s*min-height:\s*var\(--touch\)/);
+  assert.match(item, /border:\s*1px solid var\(--color-control-border\)/);
+  assert.match(item, /color:\s*var\(--color-on-accent\)/);
+  assert.match(item, /pointer-events:\s*none/, "닫힌 버블은 누를 수 없다");
+  assert.doesNotMatch(item, /outline/, "포커스는 공통 외곽선을 쓴다");
+
+  for (const layer of [".qa-blob", ".qa-item"]) {
+    assert.match(rule(layer), /transform:\s*translate\(0px, 0px\) scale\(0\.4\)/, `${layer} 닫힘`);
+    assert.match(rule(`.qa-ring[data-open="true"] ${layer}`),
+      /transform:\s*translate\(var\(--qa-x, 0px\), var\(--qa-y, 0px\)\) scale\(1\)/, `${layer} 열림`);
+  }
+  assert.match(rule('.qa-ring[data-open="true"] .qa-item'), /pointer-events:\s*auto/);
+
+  const label = rule(".qa-label");
+  assert.match(label, /pointer-events:\s*none/);
+  assert.match(label, /white-space:\s*nowrap/);
+  assert.match(css, /html\[data-theme="neumorphic"\] \.qa-label\s*\{\s*box-shadow:\s*var\(--shadow-raised\)/);
+
+  // 라벨·아이콘·경계 대비를 라이트·명시 다크·시스템 다크 모두에서 확인한다.
+  const ink = label.match(/color:\s*(var\(--[\w-]+\))/)?.[1];
+  const face = label.match(/background:\s*(var\(--[\w-]+\))/)?.[1];
+  for (const [mode, resolve] of palettes()) {
+    assertContrast(resolve(ink), resolve(face), 4.5, `${mode} label`);
+    assertContrast(resolve("var(--color-on-accent)"), resolve("var(--color-school-blue)"), 4.5, `${mode} icon on blob`);
+    for (const back of ["var(--color-paper)", "var(--color-surface)", "var(--surface-card)"]) {
+      assertContrast(resolve("var(--color-school-blue)"), resolve(back), 3, `${mode} blob on ${back}`);
+      assertContrast(resolve("var(--color-control-border)"), resolve(back), 3, `${mode} bubble edge on ${back}`);
+    }
+  }
+});
+
+test("빠른 실행 링: 전환은 300ms 미만 ease-out이고 움직임 줄이기에서 꺼진다", () => {
+  const { block, rule } = qaCss();
+  const durations = [...block.matchAll(/(\d+(?:\.\d+)?)(ms|s)\b/g)].map(([, n, unit]) => Number(n) * (unit === "s" ? 1000 : 1));
+  assert.ok(durations.length >= 2, "링 전환 시간");
+  for (const ms of durations) assert.ok(ms > 0 && ms < 300, `${ms}ms`);
+
+  const ease = rule(".qa-ring").match(/--qa-ease:\s*cubic-bezier\(([^)]+)\)/)?.[1].split(",").map(Number);
+  assert.ok(ease?.length === 4, "--qa-ease");
+  const [x1, y1, , y2] = ease;
+  assert.ok(x1 < y1 && y2 === 1, "처음이 빠르고 끝이 느린 ease-out 곡선");
+  for (const [, timing] of block.matchAll(/transition:\s*([^;]+);/g)) {
+    if (timing.trim() === "none") continue;
+    for (const part of timing.split(",")) assert.match(part, /var\(--qa-ease\)|ease-out/, part);
+  }
+
+  const reduced = [...block.matchAll(/@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/g)].map(([, body]) => body).join("\n");
+  assert.match(reduced, /\.qa-blob,\s*\.qa-item\s*\{\s*transition:\s*none;/);
+});
+
 test("음각양각은 카드와 탭에 볼록한 그림자, 입력과 선택 상태에 오목한 그림자를 준다", () => {
   const css = read("assets/app.css");
   const effect = css.match(/html\[data-theme="neumorphic"\]\s*\{([^{}]*)\}/)?.[1] ?? "";
