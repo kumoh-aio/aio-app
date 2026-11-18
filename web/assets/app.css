@@ -668,6 +668,76 @@ a {
   min-height: var(--touch);
 }
 
+/* 질문 수정과 "‹ n/m ›" 버전 넘기기. 막힌 상태는 흐림 대신 muted 글자와 커서로 보여 준다. */
+.turn-actions,
+.version-nav,
+.answer-actions,
+.chat-edit-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.turn-actions {
+  justify-content: flex-end;
+}
+
+.answer-actions {
+  gap: 8px;
+}
+
+.turn-action,
+.version-step {
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0 12px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-school-blue);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.version-step {
+  padding: 0;
+  font-size: 18px;
+  line-height: 1;
+}
+
+.turn-action:disabled,
+.version-step:disabled {
+  color: var(--color-text-muted);
+  cursor: not-allowed;
+}
+
+.version-label {
+  min-width: 3ch;
+  color: var(--color-text-muted);
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.chat-edit {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  max-width: 85%;
+}
+
+.chat-edit-input {
+  min-height: var(--touch);
+}
+
+.chat-edit-row {
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* 졸업 요건 진단(기본판). 뉴모피즘판은 그래프 홈을 음각, 요건 카드를 양각으로 덮어쓴다. */
 .grad-result {
   display: grid;
