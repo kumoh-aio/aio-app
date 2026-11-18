@@ -16,7 +16,7 @@ const files = ["./", "index.html", "manifest.webmanifest", "assets/app.css", "as
   "assets/demo-login.mjs", "assets/graduation-view.mjs", "assets/calendar-view.mjs",
   "assets/calendar-grid.mjs", "assets/appearance.mjs",
   "assets/handwriting-pad.mjs", "assets/handwriting-geometry.mjs",
-  "assets/quick-actions.mjs", "assets/selection-indicator.mjs",
+  "assets/quick-actions.mjs", "assets/selection-indicator.mjs", "assets/send-icon.mjs",
   ...generatedIcons.keys()];
 const requireFullShell = process.env.AIO_REQUIRE_FULL_SHELL === "1";
 const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/home.mjs", "assets/router.mjs",
@@ -65,7 +65,7 @@ function worker(scope = "https://example.invalid/app/", fetchResponse = () => "n
     caches: { open: async (name) => { calls.opened.push(name); return cache; },
       keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4",
         "aio-shell-v5", "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10",
-        "aio-shell-v11", "unrelated"],
+        "aio-shell-v11", "aio-shell-v12", "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
     fetch: async (request, options) => {
       calls.fetched.push({ request, cache: options?.cache });
@@ -129,17 +129,18 @@ test("precache files exist or are generated icons", async () => {
   }
 });
 
-test("activate removes v0 through v10 app caches and preserves v11 and unrelated caches", async () => {
+test("activate removes v0 through v11 app caches and preserves v12 and unrelated caches", async () => {
   const { events, calls } = worker();
   let pending;
   events.install({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.opened, ["aio-shell-v11"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v12"]);
+  assert.ok(calls.added.includes("https://example.invalid/app/assets/send-icon.mjs"), "send icon module is cached");
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
   assert.deepEqual(calls.deleted,
     ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4", "aio-shell-v5",
-      "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10"]);
+      "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10", "aio-shell-v11"]);
   assert.equal(calls.claimed, 1);
 });
 
@@ -233,7 +234,7 @@ test("listed CSS GET refreshes the old shell entry for the next offline load", a
   online = false;
   const offlineCss = await fetchShell(events, request);
   assert.equal(await offlineCss.text(), ".tab-bar::before { content: ''; }");
-  assert.deepEqual(calls.opened, ["aio-shell-v11", "aio-shell-v11"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v12", "aio-shell-v12"]);
 });
 
 test("a shell cache write failure still returns the online response", async () => {
@@ -243,7 +244,7 @@ test("a shell cache write failure still returns the online response", async () =
   cache.match = async () => assert.fail("a successful fetch needs no fallback");
   const request = { url: "https://example.invalid/app/index.html", method: "GET" };
   assert.equal(await fetchShell(events, request), fresh);
-  assert.deepEqual(calls.opened, ["aio-shell-v11"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v12"]);
 });
 
 test("listed GET falls back to the shell cache only when fetch rejects", async () => {
@@ -256,7 +257,7 @@ test("listed GET falls back to the shell cache only when fetch rejects", async (
     return "cached";
   };
   assert.equal(await fetchShell(events, request), "cached");
-  assert.deepEqual(calls.opened, ["aio-shell-v11"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v12"]);
 
   cache.match = async () => undefined;
   await assert.rejects(fetchShell(events, request), (error) => error === offline);
@@ -308,6 +309,10 @@ function bootApp(startRoute, storage = null, { tabBar = null, tabs = [] } = {}) 
     createHandwritingPad(opts) {
       options.handwriting = opts;
       return { open() {}, close() { calls.handwritingClose += 1; } };
+    },
+    mountSendIcon(button, opts) {
+      calls.sendIcon = { button, opts };
+      return { setStopping() {} };
     },
     mountChat(opts) {
       options.chat = opts;
@@ -440,6 +445,20 @@ test("leaving the AIO tab closes the handwriting pad", () => {
   assert.equal(calls.handwritingClose, 0);
   options.onRoute({ route: "home" });
   assert.equal(calls.handwritingClose, 1);
+});
+
+test("chat receives a send icon factory that mounts the morph icon on the given button", () => {
+  const { calls, options, doc } = bootApp("aio");
+  assert.equal(typeof options.chat.sendIcon, "function");
+  assert.equal(calls.sendIcon, undefined, "the icon mounts only when chat-view calls the factory");
+  const button = { id: "virtual-send" };
+  const icon = options.chat.sendIcon(button);
+  assert.equal(calls.sendIcon.button, button);
+  assert.equal(calls.sendIcon.opts.doc, doc);
+  assert.equal(typeof calls.sendIcon.opts.win, "object");
+  assert.equal(typeof icon.setStopping, "function");
+  const source = read("web/assets/app.js").toString();
+  assert.match(source, /import\s*\{\s*mountSendIcon\s*\}\s*from\s*"\.\/send-icon\.mjs"/);
 });
 
 test("leaving the AIO tab closes quick actions", () => {

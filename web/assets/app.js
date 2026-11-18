@@ -12,6 +12,7 @@ import { mountCalendar } from "./calendar-view.mjs";
 import { mountAppearance } from "./appearance.mjs";
 import { createHandwritingPad } from "./handwriting-pad.mjs";
 import { createSelectionIndicator } from "./selection-indicator.mjs";
+import { mountSendIcon } from "./send-icon.mjs";
 
 const fetchImpl = globalThis.fetch.bind(globalThis);
 const api = createApi({ base: API_BASE, fetchImpl });
@@ -44,6 +45,8 @@ const chat = mountChat({
   send: (request) => chatClient.send(request),
   history: createChatHistory({ storage }),
   handwriting,
+  // 전송 화살표 ↔ 정지 ■ 모핑. chat-view는 버튼을 만들 때 한 번 부르고 응답 중에는 setStopping만 부른다.
+  sendIcon: (button) => mountSendIcon(button, { doc: document, win: window }),
   quickActions: [
     { id: "calendar", label: { ko: "학사일정", en: "Calendar", zh: "校历" },
       run: () => router.navigate("calendar") },
