@@ -260,6 +260,7 @@ Google Stitch로 만든 시안을 기준으로 한다. 내보낸 원본(HTML·�
 
 - 가는 쪽 모서리는 바로, 반대쪽 모서리는 `--indicator-lag`만큼 늦게 출발한다. 그래서 표시가 두 칸에 걸쳐 늘어났다가 줄어든다.
 - 표식을 진한 강조색 채움으로 그리면 전환 중에 흰 글자가 바탕 위에, 보조 글자가 강조색 위에 놓여 읽히지 않는다. 그래서 선택 표시가 켜지면 세그먼트 표식은 면 색 채움과 2px 경계로 그린다. 버튼 글자는 바탕과 표식 두 면 모두에서 4.5:1인 색만 쓴다. 고른 버튼은 빠르게 `--color-school-blue`, 깊이 생각 `--color-text`, 나머지는 `--color-text-muted`다.
+- 움직이는 2px 좌우 경계는 같은 색 글자 뒤를 지나간다. 그래서 `ready` 버튼 글자에는 표식 채움색(`--color-surface`) 1px 테두리를 네 방향 `text-shadow`로 둘러, 획과 경계선 사이를 띄운다. 겹치는 순간에도 글자는 채움색 위와 같은 4.5:1을 지킨다. 바탕(`--color-paper`) 위에서는 테두리가 바탕과 거의 같아 보이지 않는다.
 - 버튼 글자 굵기는 바꾸지 않는다. 폭이 바뀌면 잰 좌표와 표식이 어긋난다.
 - 깊이 생각의 노랑 채움은 선택 표시가 없는 기본 모양에만 남는다. 노랑은 라이트 면 위에서 경계 3:1을 넘지 못한다.
 
@@ -271,20 +272,20 @@ Google Stitch로 만든 시안을 기준으로 한다. 내보낸 원본(HTML·�
 | 고르지 않은 버튼 `--color-text-muted` | `#4A5D75` | `#9DB0C7` | 두 면 위 4.5:1 |
 | 탭 위 선 `--color-school-blue` on `--color-surface` | `#005B96` | `#3DB8E8` | 3:1 |
 
-음각양각은 그림자만 바꾸고 색 토큰은 그대로라 대비 기준이 같다. 버튼에 주던 오목한 그림자(`--shadow-recessed`)는 표식(`::before`)으로 옮긴다. 선택 표시가 없는 세그먼트는 지금처럼 버튼에 그림자를 준다.
+음각양각은 그림자만 바꾸고 색 토큰은 그대로라 대비 기준이 같다. 버튼에 주던 오목한 그림자(`--shadow-recessed`)는 표식(`::before`)으로 옮긴다. `ready`가 아닌 세그먼트(표시 없음·`instant`)는 지금처럼 버튼에 그림자를 준다.
 
 ### 속성 계약
 
 | 이름 | 놓는 곳 | 값 |
 | --- | --- | --- |
 | `--indicator-left`, `--indicator-right` | 컨테이너 | 안쪽 경계(padding 상자)에서 표식 왼쪽·오른쪽 끝까지의 px. CSS `left`·`right`와 같은 뜻 |
-| `data-indicator` | 컨테이너 | 없음이면 지금 모양 그대로. `instant`면 전환 없이 놓고, `ready`면 전환으로 옮긴다 |
+| `data-indicator` | 컨테이너 | 없음이면 지금 모양 그대로. `instant`도 지금 모양 그대로이고 보이지 않는 표식만 좌표에 놓는다. `ready`면 기존 강조를 표식으로 옮기고 전환한다 |
 | `data-indicator-dir` | 컨테이너 | `forward`(오른쪽으로) 또는 `back`(왼쪽으로) |
 
 - 표식은 컨테이너의 `::before` 하나다. `pointer-events: none`, `z-index: -1`이고 세그먼트는 `isolation: isolate`로 표식이 바탕 밑으로 빠지지 않게 한다.
-- `.mode-group`은 `position: relative`다. `.tab-bar`는 이미 `position: fixed`라 표식의 기준 상자이고 relative로 덮지 않는다.
+- `.mode-group`은 `position: relative`다. `.tab-bar`는 `position: fixed`를 그대로 둔다. fixed도 relative처럼 절대 위치 `::before`의 기준 상자(padding 상자)가 되므로 좌표 계약은 같다. relative로 바꾸면 탭 막대가 화면 아래 고정에서 풀려 본문 끝으로 밀려난다.
 - 세그먼트 표식 색은 `:has(.mode-deep[aria-pressed="true"])`로 고른다. 모드용 속성을 따로 두지 않는다.
-- `instant`와 `ready` 모두 표식 모양을 쓰고, 전환은 `ready`에서만 건다.
+- `instant`에서 표식은 `opacity: 0`으로 좌표에만 놓인다. 첫 선택 때 `ready`가 되면 표식이 이전 자리에서 보이며 출발하고, 버튼 채움·탭 위 선·음각양각 그림자가 표식으로 넘어간다. 전환은 `ready`에서만 건다.
 
 ### 시간과 곡선
 

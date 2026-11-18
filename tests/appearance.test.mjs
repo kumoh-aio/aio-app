@@ -597,9 +597,10 @@ test("음각양각은 카드와 탭에 볼록한 그림자, 입력과 선택 상
   assert.match(effect, /--shadow-input:\s*var\(--shadow-recessed\)/);
   assert.match(css, /html\[data-theme="neumorphic"\] \.tab-bar\s*\{\s*box-shadow:\s*var\(--shadow-raised\)/);
   // 선택 표시가 없는 세그먼트만 버튼에 오목한 그림자를 주고, 표시가 있으면 그림자는 표식(::before)이 맡는다.
-  assert.match(css, /\.mode-group:not\(\[data-indicator\]\) \.mode-button\[aria-pressed="true"\],\s*\.appearance-option:has\(input:checked\)\s*\)\s*\{\s*box-shadow:\s*var\(--shadow-recessed\)/);
+  // instant에서는 표식이 보이지 않으므로 ready일 때만 그림자를 표식으로 옮긴다.
+  assert.match(css, /\.mode-group:not\(\[data-indicator="ready"\]\) \.mode-button\[aria-pressed="true"\],\s*\.appearance-option:has\(input:checked\)\s*\)\s*\{\s*box-shadow:\s*var\(--shadow-recessed\)/);
   assert.doesNotMatch(css, /[,(]\s*\.mode-button\[aria-pressed="true"\],/, "표식과 버튼에 그림자가 겹치지 않는다");
-  assert.match(css, /html\[data-theme="neumorphic"\] \.mode-group\[data-indicator\]::before\s*\{\s*box-shadow:\s*var\(--shadow-recessed\)/);
+  assert.match(css, /html\[data-theme="neumorphic"\] \.mode-group\[data-indicator="ready"\]::before\s*\{\s*box-shadow:\s*var\(--shadow-recessed\)/);
 });
 
 // ---- 답변 모드·아래 탭 선택 표시 ----
@@ -648,9 +649,22 @@ test("선택 표시: data-indicator가 없으면 ::before를 만들지 않아 �
   assert.match(rule(".tab-bar"), /position:\s*fixed/);
   assert.doesNotMatch(css, /\.tab-bar[^{}]*\{[^{}]*position:\s*relative/);
   assert.match(rule(".tab-bar[data-indicator]::before"), /top:\s*0;\s*height:\s*3px;\s*background:\s*var\(--color-school-blue\)/);
-  assert.match(rule('.tab-bar[data-indicator] .tab[aria-current="page"]'), /border-top-color:\s*transparent/);
-  const pressed = rule('.mode-group[data-indicator] .mode-button[aria-pressed="true"]');
+  assert.match(rule('.tab-bar[data-indicator="ready"] .tab[aria-current="page"]'), /border-top-color:\s*transparent/);
+  const pressed = rule('.mode-group[data-indicator="ready"] .mode-button[aria-pressed="true"]');
   assert.match(pressed, /background:\s*transparent;\s*border-color:\s*transparent;/);
+  // instant: 표식은 좌표에만 미리 놓이고 보이지 않으며, 버튼 채움과 탭 위 선은 기존 규칙 그대로다.
+  assert.match(mark, /opacity:\s*0/);
+  assert.match(rule('.mode-group[data-indicator="ready"]::before,\n.tab-bar[data-indicator="ready"]::before'), /opacity:\s*1/);
+  for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    for (const part of selector.split(",").map((text) => text.trim())) {
+      if (!/\.(?:mode-group|tab-bar)\[data-indicator/.test(part)) continue;
+      // 표식 안쪽 버튼·탭을 바꾸는 규칙(기존 채움·글자색·위 선 덮어쓰기)은 ready에서만 건다.
+      if (/\s\.(?:mode-button|mode-deep|tab)(?![\w-])/.test(part)) {
+        assert.match(part, /\[data-indicator="ready"\]/, `instant에서 기존 강조를 바꾸지 않는다: ${part}`);
+      }
+      if (/opacity:\s*1/.test(body)) assert.match(part, /\[data-indicator="ready"\]/, `표식은 ready에서만 보인다: ${part}`);
+    }
+  }
   // 세그먼트 색은 :has로만 고르고 모드용 속성을 따로 두지 않는다.
   assert.match(rule('.mode-group[data-indicator]:has(.mode-deep[aria-pressed="true"])::before'), /border-color:\s*var\(--color-text\)/);
   assert.doesNotMatch(css, /data-indicator-mode|data-mode=/);
@@ -721,8 +735,15 @@ test("선택 표시: 안착과 전환 중 글자 4.5:1, 표식 경계 3:1을 라
   const fill = value(".mode-group[data-indicator]::before", "background");
   const fastEdge = value(".mode-group[data-indicator]::before", "border").replace(/^2px solid\s+/, "");
   const deepEdge = value('.mode-group[data-indicator]:has(.mode-deep[aria-pressed="true"])::before', "border-color");
-  const fastInk = value('.mode-group[data-indicator] .mode-button[aria-pressed="true"]', "color");
-  const deepInk = value('.mode-group[data-indicator] .mode-deep[aria-pressed="true"]', "color");
+  const fastInk = value('.mode-group[data-indicator="ready"] .mode-button[aria-pressed="true"]', "color");
+  const deepInk = value('.mode-group[data-indicator="ready"] .mode-deep[aria-pressed="true"]', "color");
+  // 움직이는 2px 좌우 경계는 같은 색 글자 뒤를 지나간다. 글자 획을 채움색 1px 테두리로 감싸 경계선과 떼어 놓으므로
+  // 겹치는 순간에도 글자는 채움색 위의 대비(아래 반복문)를 유지한다.
+  const halo = value('.mode-group[data-indicator="ready"] .mode-button', "text-shadow")?.replace(/\s+/g, " ");
+  assert.equal(halo, [["-1px", "0"], ["1px", "0"], ["0", "-1px"], ["0", "1px"]].map(([x, y]) => `${x} ${y} ${fill}`).join(", "),
+    "네 방향 1px 테두리는 표식 채움색");
+  const edgeWidth = Number(rule(".mode-group[data-indicator]::before").match(/border:\s*(\d+)px/)?.[1]);
+  assert.ok(edgeWidth <= 2, `경계 ${edgeWidth}px`);
   const idleInk = value(".mode-button", "color");
   const tabBack = value(".tab-bar", "background");
   const tabLine = value(".tab-bar[data-indicator]::before", "background");
