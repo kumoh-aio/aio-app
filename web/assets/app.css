@@ -863,6 +863,42 @@ a {
   border-left: 4px solid var(--color-sky);
 }
 
+/* 더보기 · PWA 설치 안내. 조작 요소 없는 정적 카드이고 홈 구역의 간격·카드를 그대로 쓴다. */
+.more {
+  display: grid;
+  gap: 24px;
+}
+
+.install-lead,
+.install-note {
+  margin: 0;
+  color: var(--color-text-muted);
+}
+
+.install-note {
+  font-size: 14px;
+}
+
+.install-card {
+  display: grid;
+  gap: 8px;
+  padding: 14px var(--gap);
+  border-left: 4px solid var(--color-sky);
+}
+
+.install-title {
+  margin: 0;
+  color: var(--color-navy);
+  font-size: 16px;
+}
+
+.install-steps {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 1.4em;
+}
+
 @media (max-width: 380px) {
   .shortcut-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
