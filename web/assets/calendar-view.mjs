@@ -62,11 +62,22 @@ export function mountCalendar({
   const listButton = element("button", "button-secondary", "목록");
   switcher.append(calendarButton, listButton);
   const panel = element("div", "calendar-panel");
+  const nav = element("div", "calendar-nav");
+  const previous = element("button", "button-secondary", "이전 달");
+  const next = element("button", "button-secondary", "다음 달");
+  const monthTitle = element("p", "calendar-month-title");
+  nav.append(previous, monthTitle, next);
+  panel.append(nav);
   root.replaceChildren(controls, status, retry, switcher, panel, list);
   let events = [];
   let mode = "calendar";
   let selected = validDate(today) ? today : `${year}-01-01`;
   let month = selected.slice(0, 7);
+  let grid;
+  let dayList;
+
+  previous.addEventListener("click", () => choose(moveDate(selected, "PageUp")));
+  next.addEventListener("click", () => choose(moveDate(selected, "PageDown")));
 
   function choose(value, focus = false) {
     selected = value;
@@ -79,17 +90,21 @@ export function mountCalendar({
     listButton.setAttribute("aria-pressed", String(mode === "list"));
     list.hidden = mode !== "list";
     panel.hidden = mode !== "calendar" || !events.length;
-    panel.replaceChildren();
+    grid?.remove();
+    dayList?.remove();
     if (!events.length) return;
-    const nav = element("div", "calendar-nav");
-    const previous = element("button", "button-secondary", "이전 달");
-    const next = element("button", "button-secondary", "다음 달");
-    nav.append(previous, element("p", "calendar-month-title", `${month.slice(0, 4)}년 ${Number(month.slice(5))}월`), next);
-    previous.addEventListener("click", () => choose(moveDate(selected, "PageUp")));
-    next.addEventListener("click", () => choose(moveDate(selected, "PageDown")));
-    const grid = element("div", "calendar-month");
+    monthTitle.textContent = `${month.slice(0, 4)}년 ${Number(month.slice(5))}월`;
+    grid = element("div", "calendar-month");
     grid.setAttribute("role", "grid");
     grid.setAttribute("aria-label", `${month} 학사일정`);
+    const weekdays = element("div", "calendar-week calendar-weekdays");
+    weekdays.setAttribute("role", "row");
+    for (const day of ["일", "월", "화", "수", "목", "금", "토"]) {
+      const header = element("span", "calendar-weekday", day);
+      header.setAttribute("role", "columnheader");
+      weekdays.append(header);
+    }
+    grid.append(weekdays);
     let focusTarget;
     for (const week of layoutMonth(events, month)) {
       const row = element("div", "calendar-week");
@@ -130,12 +145,12 @@ export function mountCalendar({
       row.append(bars);
       grid.append(row);
     }
-    const dayList = element("div", "calendar-day-list");
+    dayList = element("div", "calendar-day-list");
     dayList.append(element("h4", "", `${selected} 일정`));
     const matches = events.filter((event) => event.starts_on <= selected && eventEnd(event) >= selected);
     dayList.append(...matches.map(renderEvent));
     if (!matches.length) dayList.append(element("p", "empty-state", TEXT.empty));
-    panel.append(nav, grid, dayList);
+    panel.append(grid, dayList);
     if (focus) focusTarget?.focus();
   }
   calendarButton.addEventListener("click", () => { mode = "calendar"; renderCalendar(); });

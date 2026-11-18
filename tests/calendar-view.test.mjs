@@ -16,7 +16,16 @@ class Element {
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map((child) => child.textContent).join(""); }
   set innerHTML(value) { throw new Error("HTML 삽입 금지"); }
-  append(...nodes) { this.children.push(...nodes); }
+  append(...nodes) {
+    for (const node of nodes) node.parent = this;
+    this.children.push(...nodes);
+  }
+  remove() {
+    if (!this.parent) return;
+    this.parent.children = this.parent.children.filter((child) => child !== this);
+    this.parent = null;
+    if (Element.active === this) Element.active = null;
+  }
   replaceChildren(...nodes) { this._text = ""; this.children = nodes; }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.get(name); }
@@ -227,6 +236,34 @@ test("오늘이 범위 밖이면 첫 일정 월 선택", () => withoutStorage(as
   await s.view.refresh();
   assert.equal(s.root.byClass("calendar-month-title")[0].textContent, "2027년 3월");
   assert.ok(s.root.byClass("is-selected")[0].getAttribute("aria-label").startsWith("2027-03-02"));
+}));
+
+test("일~토 요일 머리 행이 날짜 행보다 먼저 표시됨", () => withoutStorage(async () => {
+  const s = setup(async () => response([event("01")]), { calendar: true });
+  await s.view.refresh();
+  const grid = s.root.byClass("calendar-month")[0];
+  const [weekdays] = grid.byClass("calendar-weekdays");
+  assert.equal(grid.children[0], weekdays);
+  assert.equal(weekdays.getAttribute("role"), "row");
+  assert.deepEqual(weekdays.children.map((header) => header.textContent), ["일", "월", "화", "수", "목", "금", "토"]);
+  assert.ok(weekdays.children.every((header) => header.getAttribute("role") === "columnheader"));
+}));
+
+test("이전·다음 달 버튼이 연속 실행 중에도 포커스를 유지함", () => withoutStorage(async () => {
+  const s = setup(async () => response([event("01")]), { calendar: true, today: "2027-03-01" });
+  await s.view.refresh();
+  const button = (label) => s.root.byClass("calendar-nav")[0].all("button").find((node) => node.textContent === label);
+  for (const [label, months] of [["다음 달", [4, 5]], ["이전 달", [4, 3]]]) {
+    const control = button(label);
+    control.focus();
+    for (const month of months) {
+      Element.active.dispatch("click");
+      assert.equal(button(label), control);
+      assert.equal(Element.active, control);
+      assert.equal(s.root.byClass("calendar-month-title")[0].textContent, "2027년 " + month + "월");
+    }
+  }
+  assert.equal(s.calls.length, 1);
 }));
 
 test("잘못된 응답 형식은 오류와 재시도 표시", () => withoutStorage(async () => {
