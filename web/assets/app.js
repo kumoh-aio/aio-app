@@ -31,6 +31,38 @@ mountAppearance({ doc: document, storage });
 // 대화 기록은 용량 오류를 직접 다뤄야 하므로 원래 저장소를 그대로 쓴다.
 const prefs = createPrefStorage(storage);
 const homeRoot = document.getElementById("home-root");
+
+// 전송 화살표 ↔ 정지 ■ 모핑은 동적 import로 불러온다. 이전 셸 캐시(v11)의 워커가 아직 제어하는 동안에는
+// 새 app.js만 저장되고 send-icon.mjs는 저장되지 않는다. 정적 import면 오프라인에서 앱 전체가 시작되지 않는다.
+// 부팅은 이 요청을 기다리지 않는다. chat-view는 sendIcon을 받으면 글자 갱신을 맡기므로, 아이콘이 붙기 전과
+// 불러오지 못한 경우에는 이 팩터리가 글자("보내기"↔"중단", docs/DESIGN.md 전송·정지 버튼 절)를 바꾼다.
+const SEND_LABEL = Object.freeze({ send: "보내기", stop: "중단" });
+const sendIconModule = import("./send-icon.mjs").catch(() => null);
+
+function sendIcon(button) {
+  let icon = null;
+  let stopping = false;
+  const label = button.querySelector?.(".chat-send-label") ?? null;
+  // 아이콘이 붙은 뒤에도 글자는 화면 읽기·고대비용으로 남으므로 늘 상태와 맞춘다.
+  const showLabel = () => {
+    if (label) label.textContent = stopping ? SEND_LABEL.stop : SEND_LABEL.send;
+  };
+  sendIconModule.then((module) => {
+    if (typeof module?.mountSendIcon !== "function") return;
+    // 늦게 붙어도 지금 상태 모양을 바로 그린다. 붙인 뒤 setStopping을 부르면 화살표에서 정지로 모핑해 보인다.
+    icon = module.mountSendIcon(button, { doc: document, win: window, stopping });
+  }).catch(() => {
+    icon = null; // 아이콘을 붙이지 못하면 글자 버튼으로 남는다
+  });
+  return {
+    setStopping(on) {
+      stopping = Boolean(on);
+      showLabel();
+      icon?.setStopping(stopping);
+    },
+  };
+}
+
 const handwriting = createHandwritingPad({
   doc: document,
   recognize: (request) => api.handwriting(request),
@@ -44,6 +76,7 @@ const chat = mountChat({
   send: (request) => chatClient.send(request),
   history: createChatHistory({ storage }),
   handwriting,
+  sendIcon,
   quickActions: [
     { id: "calendar", label: { ko: "학사일정", en: "Calendar", zh: "校历" },
       run: () => router.navigate("calendar") },

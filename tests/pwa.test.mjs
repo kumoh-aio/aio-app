@@ -16,7 +16,7 @@ const files = ["./", "index.html", "manifest.webmanifest", "assets/app.css", "as
   "assets/demo-login.mjs", "assets/graduation-view.mjs", "assets/calendar-view.mjs",
   "assets/calendar-grid.mjs", "assets/appearance.mjs",
   "assets/handwriting-pad.mjs", "assets/handwriting-geometry.mjs",
-  "assets/quick-actions.mjs", "assets/selection-indicator.mjs",
+  "assets/quick-actions.mjs", "assets/selection-indicator.mjs", "assets/send-icon.mjs",
   ...generatedIcons.keys()];
 const requireFullShell = process.env.AIO_REQUIRE_FULL_SHELL === "1";
 const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/home.mjs", "assets/router.mjs",
@@ -65,7 +65,7 @@ function worker(scope = "https://example.invalid/app/", fetchResponse = () => "n
     caches: { open: async (name) => { calls.opened.push(name); return cache; },
       keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4",
         "aio-shell-v5", "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10",
-        "aio-shell-v11", "unrelated"],
+        "aio-shell-v11", "aio-shell-v12", "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
     fetch: async (request, options) => {
       calls.fetched.push({ request, cache: options?.cache });
@@ -129,17 +129,18 @@ test("precache files exist or are generated icons", async () => {
   }
 });
 
-test("activate removes v0 through v10 app caches and preserves v11 and unrelated caches", async () => {
+test("activate removes v0 through v11 app caches and preserves v12 and unrelated caches", async () => {
   const { events, calls } = worker();
   let pending;
   events.install({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.opened, ["aio-shell-v11"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v12"]);
+  assert.ok(calls.added.includes("https://example.invalid/app/assets/send-icon.mjs"), "send icon module is cached");
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
   assert.deepEqual(calls.deleted,
     ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4", "aio-shell-v5",
-      "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10"]);
+      "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10", "aio-shell-v11"]);
   assert.equal(calls.claimed, 1);
 });
 
@@ -233,7 +234,7 @@ test("listed CSS GET refreshes the old shell entry for the next offline load", a
   online = false;
   const offlineCss = await fetchShell(events, request);
   assert.equal(await offlineCss.text(), ".tab-bar::before { content: ''; }");
-  assert.deepEqual(calls.opened, ["aio-shell-v11", "aio-shell-v11"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v12", "aio-shell-v12"]);
 });
 
 test("a shell cache write failure still returns the online response", async () => {
@@ -243,7 +244,7 @@ test("a shell cache write failure still returns the online response", async () =
   cache.match = async () => assert.fail("a successful fetch needs no fallback");
   const request = { url: "https://example.invalid/app/index.html", method: "GET" };
   assert.equal(await fetchShell(events, request), fresh);
-  assert.deepEqual(calls.opened, ["aio-shell-v11"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v12"]);
 });
 
 test("listed GET falls back to the shell cache only when fetch rejects", async () => {
@@ -256,7 +257,7 @@ test("listed GET falls back to the shell cache only when fetch rejects", async (
     return "cached";
   };
   assert.equal(await fetchShell(events, request), "cached");
-  assert.deepEqual(calls.opened, ["aio-shell-v11"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v12"]);
 
   cache.match = async () => undefined;
   await assert.rejects(fetchShell(events, request), (error) => error === offline);
@@ -272,7 +273,9 @@ test("online HTTP errors do not fall back to a stale shell file", async () => {
 });
 
 // app.js의 import 줄을 걷어 내고 모듈 함수를 스텁으로 넣어 부팅한다. 네트워크와 저장소는 쓰지 않는다.
-function bootApp(startRoute, storage = null, { tabBar = null, tabs = [] } = {}) {
+// 전송 아이콘 모듈은 부팅을 막지 않는 동적 import다. 가짜 로더(Promise)로 바꿔 끼워 대기·성공·실패를 정한다.
+const SEND_ICON_IMPORT = 'import("./send-icon.mjs")';
+function bootApp(startRoute, storage = null, { tabBar = null, tabs = [], loadSendIcon = null } = {}) {
   const calls = { refresh: 0, calendarRefresh: 0, moves: [], students: 0, login: [], diagnosis: [], handwritingClose: 0, quickActionsClose: 0 };
   const roots = new Map();
   const doc = {
@@ -290,7 +293,15 @@ function bootApp(startRoute, storage = null, { tabBar = null, tabs = [] } = {}) 
   const options = {};
   const diagnosis = { show() {}, clear() {} };
   const fetchStub = async () => assert.fail("unexpected network request");
-  vm.runInNewContext(read("web/assets/app.js").toString().replace(/^import .*;\r?\n/gm, ""), {
+  const source = read("web/assets/app.js").toString();
+  assert.equal(source.split(SEND_ICON_IMPORT).length, 2, "send-icon.mjs dynamic import appears once");
+  vm.runInNewContext(source.replace(/^import .*;\r?\n/gm, "").replace(SEND_ICON_IMPORT, "loadSendIconModule()"), {
+    loadSendIconModule: loadSendIcon ?? (async () => ({
+      mountSendIcon(button, opts) {
+        calls.sendIcon = { button, opts };
+        return { setStopping() {} };
+      },
+    })),
     API_BASE: "https://example.invalid",
     fetch: fetchStub,
     document: doc,
@@ -440,6 +451,78 @@ test("leaving the AIO tab closes the handwriting pad", () => {
   assert.equal(calls.handwritingClose, 0);
   options.onRoute({ route: "home" });
   assert.equal(calls.handwritingClose, 1);
+});
+
+const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+// chat-view가 만드는 전송 버튼을 흉내 낸다. 글자 span 하나만 찾을 수 있다.
+function fakeSendButton() {
+  const label = { textContent: "보내기" };
+  return {
+    label,
+    querySelector: (selector) => (selector === ".chat-send-label" ? label : null),
+  };
+}
+
+test("a pending send icon request never blocks boot and the factory keeps the text label in sync", () => {
+  // 셸은 응답하고 send-icon.mjs 요청만 끝나지 않는 상황
+  const { calls, options } = bootApp("calendar", null, { loadSendIcon: () => new Promise(() => {}) });
+  assert.equal(calls.calendarRefresh, 1, "the router started and showed the first route");
+  assert.equal(typeof options.chat.sendIcon, "function");
+  assert.equal(typeof options.calendar, "object");
+  const button = fakeSendButton();
+  const icon = options.chat.sendIcon(button);
+  icon.setStopping(true);
+  assert.equal(button.label.textContent, "중단");
+  icon.setStopping(false);
+  assert.equal(button.label.textContent, "보내기");
+  const source = read("web/assets/app.js").toString();
+  assert.doesNotMatch(source, /^import[^;]*["']\.\/send-icon\.mjs["']/m, "no static import of a module the old worker cannot serve");
+  assert.doesNotMatch(source, /\bawait\b/, "boot awaits nothing");
+});
+
+test("a late send icon module mounts on the same button in the current stop shape", async () => {
+  let release;
+  const mounted = [];
+  const states = [];
+  const { options, doc } = bootApp("aio", null, { loadSendIcon: () => new Promise((resolve) => { release = resolve; }) });
+  const button = fakeSendButton();
+  const icon = options.chat.sendIcon(button);
+  icon.setStopping(true); // 응답이 아이콘보다 먼저 시작됐다
+  release({
+    mountSendIcon(target, opts) {
+      mounted.push({ target, opts });
+      return { setStopping: (on) => states.push(on) };
+    },
+  });
+  await settle();
+  assert.equal(mounted.length, 1);
+  assert.equal(mounted[0].target, button);
+  assert.equal(mounted[0].opts.doc, doc);
+  assert.equal(typeof mounted[0].opts.win, "object");
+  // 붙이는 순간의 상태로 그린다. 붙인 뒤 setStopping(true)를 부르면 화살표에서 정지로 모핑해 보인다.
+  assert.equal(mounted[0].opts.stopping, true, "mounts directly in the stop shape");
+  assert.deepEqual(states, [], "no morph from the arrow right after mounting");
+  icon.setStopping(false);
+  assert.deepEqual(states, [false]);
+  assert.equal(button.label.textContent, "보내기", "the hidden label still follows the state");
+});
+
+test("a failed send icon module under the previous worker leaves a working text button", async () => {
+  // v11 워커는 새 app.js를 저장하지만 send-icon.mjs는 모른다. 오프라인에서 그 import가 실패해도
+  // chat-view는 sendIcon을 받았으므로 글자를 바꾸지 않는다. 팩터리가 "보내기"↔"중단"을 맡는다.
+  for (const outcome of [() => Promise.reject(new TypeError("offline: send-icon.mjs not cached")),
+    async () => ({}), async () => ({ mountSendIcon() { throw new Error("가상 마운트 오류"); } })]) {
+    const { options, calls } = bootApp("aio", null, { loadSendIcon: outcome });
+    const button = fakeSendButton();
+    const icon = options.chat.sendIcon(button);
+    await settle();
+    icon.setStopping(true);
+    assert.equal(button.label.textContent, "중단");
+    icon.setStopping(false);
+    assert.equal(button.label.textContent, "보내기");
+    assert.equal(calls.sendIcon, undefined);
+  }
 });
 
 test("leaving the AIO tab closes quick actions", () => {
