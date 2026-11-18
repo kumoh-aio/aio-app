@@ -1,0 +1,545 @@
+<!DOCTYPE html>
+
+<html lang="ko"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
+<meta content="mobile_tab" name="shell-type"/>
+<title>금오공대 학사 행정 AI</title>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&amp;display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+    tailwind.config = {
+      darkMode: "class",
+      theme: {
+        extend: {
+          colors: {
+            "nm-bg": "#E6EDF3",
+            "nm-base": "#E6EDF3",
+            "nm-inset": "#DEE6EE",
+            "nm-dark": "#A3B1C6",
+            "primary-container": "#0A2540",
+            "kit-navy": "#0A2540",
+            "kit-blue": "#005B96",
+            "kit-sky": "#00A3D9",
+            "kit-accent": "#FFD100",
+            "slate-title": "#0A2540",
+            "slate-body": "#1E293B",
+            "slate-muted": "#475569"
+          },
+          fontFamily: {
+            sans: ["Inter", "sans-serif"]
+          },
+          borderRadius: {
+            '2xl': '1.25rem',
+            '3xl': '1.5rem',
+            '4xl': '1.75rem'
+          }
+        }
+      }
+    };
+  </script>
+<style>
+    @layer base {
+      html, body {
+        width: 100vw;
+        margin: 0;
+        padding: 0;
+        background-color: #E6EDF3;
+        font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      }
+      body {
+        overscroll-behavior: none;
+      }
+      .pb-safe {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+      .pt-safe {
+        padding-top: env(safe-area-inset-top, 0px);
+      }
+    }
+    ::-webkit-scrollbar {
+      display: none;
+    }
+
+    /* Soft Neumorphic Utilities */
+    .nm-raised {
+      background: #E6EDF3;
+      box-shadow: -5px -5px 12px rgba(255, 255, 255, 0.95),
+                  5px 5px 14px rgba(163, 177, 198, 0.58);
+      border: 1px solid rgba(255, 255, 255, 0.8);
+    }
+    .nm-raised-sm {
+      background: #E6EDF3;
+      box-shadow: -3px -3px 8px rgba(255, 255, 255, 0.95),
+                  3px 3px 8px rgba(163, 177, 198, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.85);
+    }
+    .nm-inset {
+      background: #DEE6EE;
+      box-shadow: inset 3px 3px 6px rgba(163, 177, 198, 0.52),
+                  inset -3px -3px 6px rgba(255, 255, 255, 0.9);
+      border: 1px solid rgba(163, 177, 198, 0.25);
+    }
+    .nm-inset-deep {
+      background: #DCE5ED;
+      box-shadow: inset 4px 4px 8px rgba(163, 177, 198, 0.58),
+                  inset -4px -4px 8px rgba(255, 255, 255, 0.95);
+      border: 1px solid rgba(163, 177, 198, 0.35);
+    }
+    .nm-inset-tab {
+      background: #DEE6EE;
+      box-shadow: inset 2px 2px 5px rgba(163, 177, 198, 0.55),
+                  inset -2px -2px 5px rgba(255, 255, 255, 0.95);
+    }
+    .nm-active-pressed:active {
+      box-shadow: inset 2px 2px 5px rgba(163, 177, 198, 0.6),
+                  inset -2px -2px 5px rgba(255, 255, 255, 0.85);
+      transform: scale(0.985);
+    }
+  </style>
+</head>
+<body class="bg-nm-bg text-slate-body flex flex-col min-h-screen antialiased selection:bg-kit-sky/20">
+<!-- Header -->
+<header class="fixed top-0 w-full z-50 bg-[#E6EDF3]/90 backdrop-blur-md pt-safe border-b border-white/60 shadow-[0_4px_16px_rgba(163,177,198,0.25)]">
+<div class="h-16 px-4 flex items-center justify-between">
+<div class="flex items-center gap-2.5">
+<div class="w-10 h-10 rounded-2xl nm-raised flex items-center justify-center p-1.5 shrink-0">
+<img alt="Techmo Mascot Logo" class="w-full h-full object-contain" src="https://lh3.googleusercontent.com/aida/ALJJyrAOB-DyGpU0RGTV0S7klFxZ4Y29wdWgU8HGoPy3lplaXc5TRea3wMa8qv7WGNzTDGTzdG0klWTZG3a4-X-saPbNReuDo8qw_42RrOSOPIKpMOg3SA8KUnAjE0Vbrq0c0Byx9r_DoTtvUXuLQM2SSc9Ysrzha01BgjP1ZPD9v3ReXQm-A7S2aMYbpgrHSR7yy0MWqM5Ynza-CLUy3zHQkXigErkgwSXX3VBG5BzPRf4"/>
+</div>
+<div class="flex flex-col">
+<div class="flex items-center gap-1.5">
+<span class="font-bold text-[17px] text-kit-navy tracking-tight leading-none">금오공대 학사 행정</span>
+<span class="px-1.5 py-0.5 rounded-full bg-kit-sky/15 text-kit-sky text-[11px] font-bold tracking-tight">AI</span>
+</div>
+<span class="text-[12px] font-medium text-slate-muted mt-0.5">KIT 학사 도우미</span>
+</div>
+</div>
+<div class="flex items-center gap-2">
+<!-- Language Dropdown -->
+<button class="h-9 px-2.5 rounded-xl nm-raised-sm flex items-center gap-1 text-[12px] font-semibold text-slate-muted hover:text-kit-navy nm-active-pressed transition-all" type="button">
+<span class="material-symbols-outlined text-[16px] text-kit-blue">translate</span>
+<span>한국어</span>
+<span class="material-symbols-outlined text-[14px]">expand_more</span>
+</button>
+<!-- Notification Bell -->
+<button aria-label="알림" class="w-9 h-9 rounded-xl nm-raised-sm flex items-center justify-center text-slate-muted relative nm-active-pressed transition-all" type="button">
+<span class="material-symbols-outlined text-[20px]">notifications</span>
+<span class="absolute top-2 right-2 w-2 h-2 rounded-full bg-kit-sky shadow-[0_0_6px_rgba(0,163,217,0.8)]"></span>
+</button>
+<!-- Profile Avatar -->
+<div class="w-9 h-9 rounded-xl nm-raised-sm p-0.5 flex items-center justify-center">
+<img alt="Profile" class="w-full h-full rounded-[10px] object-cover" src="https://lh3.googleusercontent.com/aida-public/AB6AXuAMs9aFLQzfJiccotNScI-UQCwdI7uo7JZ735rDsdvIcBSCWT3AAhBeZcRvGlNh-7gfXO5pUazTP1F0-zd_u0KewDWgXlTr4MsV-URnGkmtyrYPMIgUEebQ63pojBKQCWb66EH0kWhZw1rd56zwz9PhxPfxPiKe3wS_Ru4su3_auUbxlK_qHA8HauItMENgSGEqcRlLwD6p4QXp700W03uIRIamL_O6Wmj0TKD5s7Y"/>
+</div>
+</div>
+</div>
+</header>
+<!-- Main Content -->
+<main class="flex flex-col relative w-full pt-16 pb-28 min-h-screen">
+<div class="flex flex-col w-full gap-4 pt-3">
+<!-- Top Greeting & Academic Status Card -->
+<section class="px-4">
+<div class="nm-raised rounded-3xl p-4 flex items-center justify-between">
+<div class="flex flex-col min-w-0 pr-2">
+<div class="flex items-center gap-1.5">
+<span class="font-bold text-[18px] text-kit-navy tracking-tight truncate">금오공대 학사 행정 AI</span>
+<span class="text-[18px]">🏛️</span>
+</div>
+<span class="text-[13px] font-medium text-slate-muted truncate mt-1">KIT 학사 도우미 · 컴퓨터공학과 21학번 김금오</span>
+</div>
+<div class="flex items-center gap-1.5 px-3 py-1.5 rounded-full nm-inset shrink-0">
+<span class="w-2 h-2 rounded-full bg-kit-sky animate-ping"></span>
+<span class="text-[12px] font-bold text-kit-blue">수강변경 D-2</span>
+</div>
+</div>
+</section>
+<!-- AI Hero & Ask Box Area -->
+<section class="px-4">
+<div class="nm-raised rounded-3xl p-5 relative overflow-hidden">
+<!-- Subtle lighting accent -->
+<div class="absolute -right-8 -top-8 w-36 h-36 rounded-full bg-kit-sky/10 blur-2xl pointer-events-none"></div>
+<div class="flex items-start justify-between relative z-10 mb-3.5">
+<div class="flex flex-col">
+<div class="flex items-center gap-2">
+<span class="text-[20px] font-extrabold text-kit-navy tracking-tight">학사 행정 AI Q&amp;A</span>
+<span class="px-2.5 py-0.5 rounded-full bg-kit-blue text-white text-[11px] font-bold shadow-sm">아이오가 답해요</span>
+</div>
+<p class="text-[13px] font-medium text-slate-muted mt-1 leading-snug">
+                학사 규정, 졸업 요건, 장학금 등 학사 행정을 검색하거나 질문하세요
+              </p>
+</div>
+<div class="w-12 h-12 rounded-2xl nm-raised-sm flex items-center justify-center shrink-0">
+<img alt="아이오" class="w-8 h-8 object-contain" src="https://lh3.googleusercontent.com/aida/ALJJyrAOB-DyGpU0RGTV0S7klFxZ4Y29wdWgU8HGoPy3lplaXc5TRea3wMa8qv7WGNzTDGTzdG0klWTZG3a4-X-saPbNReuDo8qw_42RrOSOPIKpMOg3SA8KUnAjE0Vbrq0c0Byx9r_DoTtvUXuLQM2SSc9Ysrzha01BgjP1ZPD9v3ReXQm-A7S2aMYbpgrHSR7yy0MWqM5Ynza-CLUy3zHQkXigErkgwSXX3VBG5BzPRf4"/>
+</div>
+</div>
+<!-- Inset Ask Well -->
+<div class="relative z-10 nm-inset-deep rounded-2xl p-3 flex flex-col gap-2.5">
+<div class="flex items-center gap-2 px-1">
+<span class="material-symbols-outlined text-kit-sky text-[22px] shrink-0 font-bold">search_spark</span>
+<input class="w-full bg-transparent border-0 outline-none text-[14px] font-medium text-kit-navy placeholder:text-slate-muted/70 py-1" id="academic-query-input" placeholder="아이오에게 학사 규정, 졸업 요건 등을 물어보세요..." type="text"/>
+</div>
+<div class="flex items-center justify-between pt-1">
+<div class="flex items-center gap-1.5">
+<button class="h-8 px-2.5 rounded-xl nm-raised-sm text-slate-muted hover:text-kit-navy flex items-center gap-1.5 text-[12px] font-semibold nm-active-pressed transition-all" id="camera-attach-btn" type="button">
+<span class="material-symbols-outlined text-[17px] text-kit-blue">photo_camera</span>
+<span>서류 스캔</span>
+</button>
+<button aria-label="음성 질문" class="h-8 w-8 rounded-xl nm-raised-sm text-slate-muted hover:text-kit-navy flex items-center justify-center nm-active-pressed transition-all" type="button">
+<span class="material-symbols-outlined text-[17px]">mic</span>
+</button>
+</div>
+<button class="h-9 px-4 rounded-xl bg-kit-navy hover:bg-[#061729] text-white text-[13px] font-bold flex items-center gap-1.5 shadow-[2px_3px_8px_rgba(10,37,64,0.3)] active:scale-95 transition-all" type="button">
+<span>아이오에게 질문</span>
+<span class="material-symbols-outlined text-[15px]">arrow_upward</span>
+</button>
+</div>
+</div>
+<!-- AI Mode Switcher: Raised vs Inset Pressed State -->
+<div class="relative z-10 flex items-center gap-2 mt-3.5">
+<span class="text-[12px] font-bold text-slate-muted ml-0.5">AI 모드:</span>
+<button class="h-7 px-3 rounded-full nm-raised-sm text-slate-muted font-semibold text-[11px] flex items-center gap-1 nm-active-pressed transition-all" id="mode-fast-btn" type="button">
+<span>⚡</span><span>빠르게 (Fast)</span>
+</button>
+<button class="h-7 px-3 rounded-full bg-kit-navy text-white font-bold text-[11px] flex items-center gap-1 shadow-[inset_1px_1px_3px_rgba(255,255,255,0.2),2px_2px_6px_rgba(10,37,64,0.35)] transition-all" id="mode-deep-btn" type="button">
+<span>🧠</span><span>깊이 생각 (Deep Think)</span>
+</button>
+</div>
+</div>
+</section>
+<!-- 8 Core Academic Administration Grid Cards -->
+<section class="px-4">
+<div class="flex items-center justify-between mb-3 px-1">
+<h2 class="font-extrabold text-[17px] text-kit-navy tracking-tight">학사 행정 바로가기</h2>
+<span class="text-[12px] font-bold text-kit-blue">원클릭 AI 행정 안내</span>
+</div>
+<div class="grid grid-cols-2 gap-3.5">
+<!-- Card 1: 학사 규정 질문 -->
+<div class="nm-raised rounded-3xl p-4 flex flex-col justify-between nm-active-pressed cursor-pointer transition-all">
+<div>
+<div class="flex items-center justify-between mb-2.5">
+<div class="w-10 h-10 rounded-2xl nm-inset flex items-center justify-center text-kit-blue font-bold">
+<span class="material-symbols-outlined text-[22px]">help_center</span>
+</div>
+<span class="px-2 py-0.5 rounded-full nm-inset text-kit-blue font-bold text-[11px]">규정 AI</span>
+</div>
+<span class="font-bold text-[16px] text-kit-navy block leading-tight">학사 규정 질문</span>
+<span class="text-[12px] font-medium text-slate-muted mt-1 block truncate">학칙·시행세칙 즉시 검색</span>
+</div>
+<div class="mt-4 pt-2 border-t border-white/60 flex items-center justify-between text-kit-blue">
+<span class="text-[12px] font-bold">질문하기</span>
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</div>
+</div>
+<!-- Card 2: 졸업 요건 -->
+<div class="nm-raised rounded-3xl p-4 flex flex-col justify-between nm-active-pressed cursor-pointer transition-all">
+<div>
+<div class="flex items-center justify-between mb-2.5">
+<div class="w-10 h-10 rounded-2xl nm-inset flex items-center justify-center text-kit-sky font-bold">
+<span class="material-symbols-outlined text-[22px]">school</span>
+</div>
+<span class="px-2 py-0.5 rounded-full bg-rose-50 text-rose-700 font-bold text-[11px] border border-rose-200">108/130학점</span>
+</div>
+<span class="font-bold text-[16px] text-kit-navy block leading-tight">졸업 요건</span>
+<span class="text-[12px] font-medium text-slate-muted mt-1 block truncate">캡스톤·공학인증 심사</span>
+</div>
+<div class="mt-4 pt-2 border-t border-white/60 flex items-center justify-between text-kit-blue">
+<span class="text-[12px] font-bold">요건 진단</span>
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</div>
+</div>
+<!-- Card 3: 수강신청·학점 -->
+<div class="nm-raised rounded-3xl p-4 flex flex-col justify-between nm-active-pressed cursor-pointer transition-all">
+<div>
+<div class="flex items-center justify-between mb-2.5">
+<div class="w-10 h-10 rounded-2xl nm-inset flex items-center justify-center text-kit-blue font-bold">
+<span class="material-symbols-outlined text-[22px]">edit_calendar</span>
+</div>
+<span class="px-2 py-0.5 rounded-full nm-inset text-amber-700 font-bold text-[11px]">정정 기간</span>
+</div>
+<span class="font-bold text-[16px] text-kit-navy block leading-tight">수강신청·학점</span>
+<span class="text-[12px] font-medium text-slate-muted mt-1 block truncate">수강변경 및 학점포기</span>
+</div>
+<div class="mt-4 pt-2 border-t border-white/60 flex items-center justify-between text-kit-blue">
+<span class="text-[12px] font-bold">신청 안내</span>
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</div>
+</div>
+<!-- Card 4: 휴학·복학 -->
+<div class="nm-raised rounded-3xl p-4 flex flex-col justify-between nm-active-pressed cursor-pointer transition-all">
+<div>
+<div class="flex items-center justify-between mb-2.5">
+<div class="w-10 h-10 rounded-2xl nm-inset flex items-center justify-center text-kit-blue font-bold">
+<span class="material-symbols-outlined text-[22px]">swap_horiz</span>
+</div>
+<span class="px-2 py-0.5 rounded-full nm-inset text-slate-muted font-bold text-[11px]">온라인 접수</span>
+</div>
+<span class="font-bold text-[16px] text-kit-navy block leading-tight">휴학·복학</span>
+<span class="text-[12px] font-medium text-slate-muted mt-1 block truncate">일반·군휴학 및 복학 절차</span>
+</div>
+<div class="mt-4 pt-2 border-t border-white/60 flex items-center justify-between text-kit-blue">
+<span class="text-[12px] font-bold">신청서 접수</span>
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</div>
+</div>
+<!-- Card 5: 장학금 -->
+<div class="nm-raised rounded-3xl p-4 flex flex-col justify-between nm-active-pressed cursor-pointer transition-all">
+<div>
+<div class="flex items-center justify-between mb-2.5">
+<div class="w-10 h-10 rounded-2xl nm-inset flex items-center justify-center text-kit-sky font-bold">
+<span class="material-symbols-outlined text-[22px]">payments</span>
+</div>
+<span class="px-2 py-0.5 rounded-full bg-sky-100 text-kit-blue font-bold text-[11px]">국장 2차</span>
+</div>
+<span class="font-bold text-[16px] text-kit-navy block leading-tight">장학금</span>
+<span class="text-[12px] font-medium text-slate-muted mt-1 block truncate">교내외·국가장학 공고</span>
+</div>
+<div class="mt-4 pt-2 border-t border-white/60 flex items-center justify-between text-kit-blue">
+<span class="text-[12px] font-bold">장학 조회</span>
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</div>
+</div>
+<!-- Card 6: 성적·학사경고 -->
+<div class="nm-raised rounded-3xl p-4 flex flex-col justify-between nm-active-pressed cursor-pointer transition-all">
+<div>
+<div class="flex items-center justify-between mb-2.5">
+<div class="w-10 h-10 rounded-2xl nm-inset flex items-center justify-center text-kit-blue font-bold">
+<span class="material-symbols-outlined text-[22px]">grading</span>
+</div>
+<span class="px-2 py-0.5 rounded-full nm-inset text-slate-muted font-bold text-[11px]">이의신청</span>
+</div>
+<span class="font-bold text-[16px] text-kit-navy block leading-tight">성적·학사경고</span>
+<span class="text-[12px] font-medium text-slate-muted mt-1 block truncate">평점 기준 및 상담 지원</span>
+</div>
+<div class="mt-4 pt-2 border-t border-white/60 flex items-center justify-between text-kit-blue">
+<span class="text-[12px] font-bold">성적 규정</span>
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</div>
+</div>
+<!-- Card 7: 증명서 발급 안내 -->
+<div class="nm-raised rounded-3xl p-4 flex flex-col justify-between nm-active-pressed cursor-pointer transition-all">
+<div>
+<div class="flex items-center justify-between mb-2.5">
+<div class="w-10 h-10 rounded-2xl nm-inset flex items-center justify-center text-kit-sky font-bold">
+<span class="material-symbols-outlined text-[22px]">print</span>
+</div>
+<span class="px-2 py-0.5 rounded-full nm-inset text-kit-blue font-bold text-[11px]">전자발급</span>
+</div>
+<span class="font-bold text-[16px] text-kit-navy block leading-tight">증명서 발급 안내</span>
+<span class="text-[12px] font-medium text-slate-muted mt-1 block truncate">재학·성적·졸업예정</span>
+</div>
+<div class="mt-4 pt-2 border-t border-white/60 flex items-center justify-between text-kit-blue">
+<span class="text-[12px] font-bold">발급 방법</span>
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</div>
+</div>
+<!-- Card 8: 학사일정 -->
+<div class="nm-raised rounded-3xl p-4 flex flex-col justify-between nm-active-pressed cursor-pointer transition-all">
+<div>
+<div class="flex items-center justify-between mb-2.5">
+<div class="w-10 h-10 rounded-2xl nm-inset flex items-center justify-center text-kit-blue font-bold">
+<span class="material-symbols-outlined text-[22px]">event_note</span>
+</div>
+<span class="px-2 py-0.5 rounded-full nm-inset text-kit-navy font-bold text-[11px]">2025-1</span>
+</div>
+<span class="font-bold text-[16px] text-kit-navy block leading-tight">학사일정</span>
+<span class="text-[12px] font-medium text-slate-muted mt-1 block truncate">주요 마감일정 캘린더</span>
+</div>
+<div class="mt-4 pt-2 border-t border-white/60 flex items-center justify-between text-kit-blue">
+<span class="text-[12px] font-bold">일정 전체보기</span>
+<span class="material-symbols-outlined text-[16px]">chevron_right</span>
+</div>
+</div>
+</div>
+</section>
+<!-- Trending Queries Section -->
+<section class="px-4">
+<div class="nm-raised rounded-3xl p-4">
+<div class="flex items-center gap-1.5 mb-3 px-1">
+<span class="material-symbols-outlined text-kit-sky text-[20px] font-bold">trending_up</span>
+<h3 class="font-extrabold text-[16px] text-kit-navy">지금 학우들이 많이 묻는 질문</h3>
+</div>
+<div class="flex flex-col gap-2.5">
+<button class="w-full text-left p-3 rounded-2xl nm-inset hover:bg-[#D8E2EC] transition-colors flex items-center justify-between group nm-active-pressed" onclick="fillQuery('# 2025-1학기 국가장학금 2차 신청기간 및 소득분위 기준 알려줘')" type="button">
+<span class="text-[13px] font-semibold text-slate-body group-hover:text-kit-blue truncate"># 2025-1학기 국가장학금 신청기간</span>
+<span class="material-symbols-outlined text-[18px] text-slate-muted group-hover:text-kit-blue shrink-0">north_east</span>
+</button>
+<button class="w-full text-left p-3 rounded-2xl nm-inset hover:bg-[#D8E2EC] transition-colors flex items-center justify-between group nm-active-pressed" onclick="fillQuery('# 공학인증(ABEEK) 필수이수과목 및 졸업설계 선이수 조건')" type="button">
+<span class="text-[13px] font-semibold text-slate-body group-hover:text-kit-blue truncate"># 공학인증(ABEEK) 필수이수과목</span>
+<span class="material-symbols-outlined text-[18px] text-slate-muted group-hover:text-kit-blue shrink-0">north_east</span>
+</button>
+<button class="w-full text-left p-3 rounded-2xl nm-inset hover:bg-[#D8E2EC] transition-colors flex items-center justify-between group nm-active-pressed" onclick="fillQuery('# 중앙도서관 열람실 좌석 배정 및 스터디룸 예약방법')" type="button">
+<span class="text-[13px] font-semibold text-slate-body group-hover:text-kit-blue truncate"># 도서관 열람실 예약방법</span>
+<span class="material-symbols-outlined text-[18px] text-slate-muted group-hover:text-kit-blue shrink-0">north_east</span>
+</button>
+</div>
+</div>
+</section>
+<!-- Campus Life Quick Links Carousel -->
+<section class="pt-1">
+<div class="px-4 flex items-center justify-between mb-3">
+<div class="flex items-center gap-1.5">
+<span class="material-symbols-outlined text-[20px] text-kit-blue font-bold">explore</span>
+<h2 class="font-extrabold text-[17px] text-kit-navy">자주 찾는 캠퍼스 바로가기</h2>
+</div>
+<div class="flex items-center gap-1.5">
+<button aria-label="이전 링크" class="w-8 h-8 rounded-xl nm-raised-sm flex items-center justify-center text-slate-muted hover:text-kit-navy nm-active-pressed" id="carousel-prev" type="button">
+<span class="material-symbols-outlined text-[18px]">chevron_left</span>
+</button>
+<button aria-label="다음 링크" class="w-8 h-8 rounded-xl nm-raised-sm flex items-center justify-center text-slate-muted hover:text-kit-navy nm-active-pressed" id="carousel-next" type="button">
+<span class="material-symbols-outlined text-[18px]">chevron_right</span>
+</button>
+</div>
+</div>
+<div class="flex gap-3 overflow-x-auto px-4 pb-3 scroll-smooth" id="campus-links-container">
+<!-- Item 1: 학교 홈피 -->
+<a class="flex flex-col items-center gap-2 shrink-0 w-16 group" href="#">
+<div class="w-14 h-14 rounded-2xl nm-raised flex items-center justify-center text-kit-blue group-hover:text-kit-sky nm-active-pressed transition-all">
+<span class="material-symbols-outlined text-[26px]">account_balance</span>
+</div>
+<span class="text-[12px] font-semibold text-slate-muted group-hover:text-kit-navy truncate w-full text-center">학교 홈피</span>
+</a>
+<!-- Item 2: 원스톱포털 -->
+<a class="flex flex-col items-center gap-2 shrink-0 w-16 group" href="#">
+<div class="w-14 h-14 rounded-2xl nm-raised flex items-center justify-center text-kit-blue group-hover:text-kit-sky nm-active-pressed transition-all">
+<span class="material-symbols-outlined text-[26px]">hub</span>
+</div>
+<span class="text-[12px] font-semibold text-slate-muted group-hover:text-kit-navy truncate w-full text-center">원스톱포털</span>
+</a>
+<!-- Item 3: LMS 강의실 -->
+<a class="flex flex-col items-center gap-2 shrink-0 w-16 group" href="#">
+<div class="w-14 h-14 rounded-2xl nm-raised flex items-center justify-center text-kit-blue group-hover:text-kit-sky nm-active-pressed transition-all">
+<span class="material-symbols-outlined text-[26px]">laptop_chromebook</span>
+</div>
+<span class="text-[12px] font-semibold text-slate-muted group-hover:text-kit-navy truncate w-full text-center">LMS 강의실</span>
+</a>
+<!-- Item 4: 도서관 -->
+<a class="flex flex-col items-center gap-2 shrink-0 w-16 group" href="#">
+<div class="w-14 h-14 rounded-2xl nm-raised flex items-center justify-center text-kit-blue group-hover:text-kit-sky nm-active-pressed transition-all">
+<span class="material-symbols-outlined text-[26px]">local_library</span>
+</div>
+<span class="text-[12px] font-semibold text-slate-muted group-hover:text-kit-navy truncate w-full text-center">도서관</span>
+</a>
+<!-- Item 5: 생활관 -->
+<a class="flex flex-col items-center gap-2 shrink-0 w-16 group" href="#">
+<div class="w-14 h-14 rounded-2xl nm-raised flex items-center justify-center text-kit-blue group-hover:text-kit-sky nm-active-pressed transition-all">
+<span class="material-symbols-outlined text-[26px]">apartment</span>
+</div>
+<span class="text-[12px] font-semibold text-slate-muted group-hover:text-kit-navy truncate w-full text-center">생활관</span>
+</a>
+<!-- Item 6: 오늘 학식 -->
+<a class="flex flex-col items-center gap-2 shrink-0 w-16 group" href="#">
+<div class="w-14 h-14 rounded-2xl nm-raised flex items-center justify-center text-kit-blue group-hover:text-kit-sky nm-active-pressed transition-all">
+<span class="material-symbols-outlined text-[26px]">restaurant</span>
+</div>
+<span class="text-[12px] font-semibold text-slate-muted group-hover:text-kit-navy truncate w-full text-center">오늘 학식</span>
+</a>
+<!-- Item 7: 에브리타임 -->
+<a class="flex flex-col items-center gap-2 shrink-0 w-16 group" href="#">
+<div class="w-14 h-14 rounded-2xl nm-raised flex items-center justify-center text-kit-blue group-hover:text-kit-sky nm-active-pressed transition-all">
+<span class="material-symbols-outlined text-[26px]">forum</span>
+</div>
+<span class="text-[12px] font-semibold text-slate-muted group-hover:text-kit-navy truncate w-full text-center">에브리타임</span>
+</a>
+</div>
+</section>
+<!-- Campus Notice Highlight Card with Techmo Visual -->
+<section class="px-4 pb-4">
+<div class="nm-raised rounded-3xl p-4 flex items-center gap-3.5 nm-active-pressed cursor-pointer">
+<div class="w-12 h-12 rounded-2xl nm-inset flex items-center justify-center shrink-0 p-1.5">
+<img alt="아이오 안내" class="w-full h-full object-contain" src="https://lh3.googleusercontent.com/aida/ALJJyrAOB-DyGpU0RGTV0S7klFxZ4Y29wdWgU8HGoPy3lplaXc5TRea3wMa8qv7WGNzTDGTzdG0klWTZG3a4-X-saPbNReuDo8qw_42RrOSOPIKpMOg3SA8KUnAjE0Vbrq0c0Byx9r_DoTtvUXuLQM2SSc9Ysrzha01BgjP1ZPD9v3ReXQm-A7S2aMYbpgrHSR7yy0MWqM5Ynza-CLUy3zHQkXigErkgwSXX3VBG5BzPRf4"/>
+</div>
+<div class="flex flex-col min-w-0 flex-1">
+<div class="flex items-center gap-1.5">
+<span class="text-[12px] font-bold text-kit-blue">아이오 꿀팁 알림</span>
+<span class="w-1 h-1 rounded-full bg-kit-sky"></span>
+<span class="text-[11px] font-medium text-slate-muted">금오공대 학생지원과</span>
+</div>
+<p class="text-[13px] font-bold text-kit-navy mt-0.5 truncate">
+              2025학년도 1학기 통학버스 노선도 및 탑승 QR코드 안내
+            </p>
+</div>
+<span class="material-symbols-outlined text-slate-muted text-[18px] shrink-0">chevron_right</span>
+</div>
+</section>
+</div>
+</main>
+<!-- Bottom Navigation: Neumorphic Floating Dock -->
+<nav class="fixed bottom-0 w-full z-50 pb-safe bg-[#E6EDF3]/95 backdrop-blur-lg border-t border-white/80 shadow-[0_-6px_20px_rgba(163,177,198,0.35)]">
+<div class="h-16 px-3 flex justify-around items-center">
+<!-- Tab 1: 홈 (Selected: Inset pressed well effect) -->
+<a aria-current="page" class="flex flex-col items-center justify-center flex-1 h-full min-h-[44px] text-kit-navy font-bold group" data-path="home" href="#">
+<span class="nm-inset-tab w-12 h-7 rounded-full flex items-center justify-center text-kit-blue">
+<span class="material-symbols-outlined text-[20px]">home</span>
+</span>
+<span class="text-[11px] font-bold mt-1 text-kit-navy">홈</span>
+</a>
+<!-- Tab 2: 아이오 -->
+<a class="flex flex-col items-center justify-center flex-1 h-full min-h-[44px] text-slate-muted hover:text-kit-navy transition-colors group nm-active-pressed" data-path="techmo-ai-chat" href="#">
+<span class="w-12 h-7 rounded-full flex items-center justify-center text-slate-muted group-hover:text-kit-blue">
+<span class="material-symbols-outlined text-[20px]">smart_toy</span>
+</span>
+<span class="text-[11px] font-semibold mt-1">아이오</span>
+</a>
+<!-- Tab 3: 졸업 -->
+<a class="flex flex-col items-center justify-center flex-1 h-full min-h-[44px] text-slate-muted hover:text-kit-navy transition-colors group nm-active-pressed" data-path="graduation-audit" href="#">
+<span class="w-12 h-7 rounded-full flex items-center justify-center text-slate-muted group-hover:text-kit-blue">
+<span class="material-symbols-outlined text-[20px]">school</span>
+</span>
+<span class="text-[11px] font-semibold mt-1">졸업</span>
+</a>
+<!-- Tab 4: 일정 -->
+<a class="flex flex-col items-center justify-center flex-1 h-full min-h-[44px] text-slate-muted hover:text-kit-navy transition-colors group nm-active-pressed" data-path="academic-calendar" href="#">
+<span class="w-12 h-7 rounded-full flex items-center justify-center text-slate-muted group-hover:text-kit-blue">
+<span class="material-symbols-outlined text-[20px]">calendar_month</span>
+</span>
+<span class="text-[11px] font-semibold mt-1">일정</span>
+</a>
+<!-- Tab 5: 더보기 -->
+<a class="flex flex-col items-center justify-center flex-1 h-full min-h-[44px] text-slate-muted hover:text-kit-navy transition-colors group nm-active-pressed" data-path="more-menu" href="#">
+<span class="w-12 h-7 rounded-full flex items-center justify-center text-slate-muted group-hover:text-kit-blue">
+<span class="material-symbols-outlined text-[20px]">more_horiz</span>
+</span>
+<span class="text-[11px] font-semibold mt-1">더보기</span>
+</a>
+</div>
+</nav>
+<script>
+    function fillQuery(text) {
+      const input = document.getElementById('academic-query-input');
+      if (input) {
+        input.value = text.replace('# ', '');
+        input.focus();
+      }
+    }
+
+    // AI Mode Switcher Toggle
+    const fastBtn = document.getElementById('mode-fast-btn');
+    const deepBtn = document.getElementById('mode-deep-btn');
+
+    if (fastBtn && deepBtn) {
+      fastBtn.addEventListener('click', () => {
+        fastBtn.className = 'h-7 px-3 rounded-full bg-kit-navy text-white font-bold text-[11px] flex items-center gap-1 shadow-[inset_1px_1px_3px_rgba(255,255,255,0.2),2px_2px_6px_rgba(10,37,64,0.35)] transition-all';
+        deepBtn.className = 'h-7 px-3 rounded-full nm-raised-sm text-slate-muted font-semibold text-[11px] flex items-center gap-1 nm-active-pressed transition-all';
+      });
+
+      deepBtn.addEventListener('click', () => {
+        deepBtn.className = 'h-7 px-3 rounded-full bg-kit-navy text-white font-bold text-[11px] flex items-center gap-1 shadow-[inset_1px_1px_3px_rgba(255,255,255,0.2),2px_2px_6px_rgba(10,37,64,0.35)] transition-all';
+        fastBtn.className = 'h-7 px-3 rounded-full nm-raised-sm text-slate-muted font-semibold text-[11px] flex items-center gap-1 nm-active-pressed transition-all';
+      });
+    }
+
+    // Campus Links Carousel Scroll
+    const carousel = document.getElementById('campus-links-container');
+    const prevBtn = document.getElementById('carousel-prev');
+    const nextBtn = document.getElementById('carousel-next');
+
+    if (carousel && prevBtn && nextBtn) {
+      prevBtn.addEventListener('click', () => {
+        carousel.scrollBy({ left: -140, behavior: 'smooth' });
+      });
+      nextBtn.addEventListener('click', () => {
+        carousel.scrollBy({ left: 140, behavior: 'smooth' });
+      });
+    }
+  </script>
+</body></html>

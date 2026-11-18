@@ -24,7 +24,7 @@
 
 ## 화면 (Stitch 시안)
 
-Google Stitch로 만든 시안을 기준으로 한다. 프로젝트: "Techmo Academic Assistant App"(Stitch 계정 소유자만 열 수 있음).
+Google Stitch로 만든 시안을 기준으로 한다. 내보낸 원본(HTML·화면 그림·디자인 토큰)은 [`docs/design/stitch/`](design/stitch/README.md)에 있다. 옮길 때 지킬 점도 그 README에 적었다.
 
 | 화면 | 기본판 | 뉴모피즘판(음각·양각) |
 | --- | --- | --- |
