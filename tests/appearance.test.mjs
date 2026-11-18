@@ -263,6 +263,10 @@ test("달력 격자는 9% 헤어라인과 대체 경계를 쓰고 좁은 화면�
   for (const name of ["enroll", "exam", "holiday", "register", "other"]) {
     assert.match(css, new RegExp(`\\.calendar-cat-${name} \\{ --cal-bg: var\\(--color-cal-${name}-bg\\); --cal-ink: var\\(--color-cal-${name}-ink\\); \\}`));
   }
+  // 목록·고른 날 카드도 분류 클래스가 붙으면 왼쪽 선이 점·막대와 같은 색이 된다. 기본 카드 규칙 뒤에서 덮는다.
+  const cardCat = css.indexOf('.calendar-event[class*="calendar-cat-"] {');
+  assert.ok(cardCat > css.indexOf(".calendar-event {") && cardCat > css.indexOf(".card {"), "카드 분류 선 규칙 위치");
+  assert.match(css.slice(cardCat, css.indexOf("}", cardCat)), /border-left-color:\s*var\(--cal-ink\)/);
   const narrow = [...css.matchAll(/@media \(max-width: 600px\)\s*\{([\s\S]*?)\n\}/g)].map(([, body]) => body).join("\n");
   assert.match(narrow, /\.calendar-bars,\s*\.calendar-more\s*\{\s*display:\s*none;/);
   assert.match(narrow, /\.calendar-dots\s*\{\s*display:\s*flex;/);
