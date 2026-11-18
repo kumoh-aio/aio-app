@@ -2,19 +2,29 @@
 :root {
   --color-navy: #0A2540;
   --color-school-blue: #005B96;
+  --color-sky-text: #0071A4;
   --color-sky: #00A3D9;
   --color-yellow: #FFD100;
-  --color-paper: #F5F9FC;
+  --color-coral: #FF7A59;
+  --color-paper: #F5F8FC;
   --color-surface: #FFFFFF;
+  --color-raised: #FFFFFF;
   --color-text: #0A2540;
-  --color-text-muted: #44566A;
+  --color-text-muted: #4A5D75;
+  --color-on-accent: #FFFFFF;
   --color-border: #D5E1EB;
-  --color-error: #B00020;
+  --color-control-border: #6E8098;
+  --color-success: #0F7A43;
+  --color-warn: #9A5B00;
+  --color-error: #C62F2F;
 
-  --surface-card: var(--color-surface);
+  --surface-card: var(--color-raised);
   --surface-input: var(--color-surface);
   --shadow-card: 0 1px 3px rgba(10, 37, 64, 0.08), 0 4px 12px rgba(10, 37, 64, 0.06);
   --shadow-input: none;
+  --shadow-guided: none;
+  --shadow-raised: 6px 6px 14px rgba(10,37,64,.16), -6px -6px 14px rgba(255,255,255,.9);
+  --shadow-recessed: inset 3px 3px 7px rgba(10,37,64,.14), inset -3px -3px 7px rgba(255,255,255,.85);
   --border-card: 1px solid var(--color-border);
 
   --radius-card: 16px;
@@ -24,13 +34,55 @@
   --gap: 16px;
   --tab-height: 60px;
   --focus-color: var(--color-school-blue);
-  --focus-width: 3px;
+  --focus-width: 2px;
   --focus-offset: 2px;
   --transition: 150ms ease;
 
   --font-body: Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", "Noto Sans KR", system-ui, sans-serif;
 
   color-scheme: light;
+}
+
+:root[data-color-mode="dark"] {
+  color-scheme: dark;
+  --color-paper: #0B1626;
+  --color-surface: #13233A;
+  --color-raised: #1A2B44;
+  --color-text: #E8EEF6;
+  --color-text-muted: #9DB0C7;
+  --color-school-blue: #3DB8E8;
+  --color-sky-text: #3DB8E8;
+  --color-on-accent: var(--color-navy);
+  --color-coral: #FF8F73;
+  --color-success: #4ADE80;
+  --color-warn: #FBBF24;
+  --color-error: #F87171;
+  --color-border: #35475F;
+  --shadow-card: 0 1px 3px rgba(0, 0, 0, .24);
+  --shadow-raised: 6px 6px 14px rgba(0,0,0,.45), -6px -6px 14px rgba(255,255,255,.05);
+  --shadow-recessed: inset 3px 3px 8px rgba(0,0,0,.5), inset -3px -3px 8px rgba(120,160,210,.08);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-color-mode="light"]) {
+    color-scheme: dark;
+    --color-paper: #0B1626;
+    --color-surface: #13233A;
+    --color-raised: #1A2B44;
+    --color-text: #E8EEF6;
+    --color-text-muted: #9DB0C7;
+    --color-school-blue: #3DB8E8;
+    --color-sky-text: #3DB8E8;
+    --color-on-accent: var(--color-navy);
+    --color-coral: #FF8F73;
+    --color-success: #4ADE80;
+    --color-warn: #FBBF24;
+    --color-error: #F87171;
+    --color-border: #35475F;
+    --shadow-card: 0 1px 3px rgba(0, 0, 0, .24);
+    --shadow-raised: 6px 6px 14px rgba(0,0,0,.45), -6px -6px 14px rgba(255,255,255,.05);
+    --shadow-recessed: inset 3px 3px 8px rgba(0,0,0,.5), inset -3px -3px 8px rgba(120,160,210,.08);
+  }
 }
 
 *,
@@ -146,7 +198,7 @@ a {
   padding: 12px;
   resize: vertical;
   background: var(--surface-input);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: var(--radius-control);
   box-shadow: var(--shadow-input);
 }
@@ -177,16 +229,16 @@ a {
   display: inline-flex;
   padding: 3px;
   background: var(--color-paper);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: var(--radius-pill);
 }
 
 .mode-button {
   min-height: var(--touch);
   min-width: var(--touch);
-  padding: 0 14px;
+  padding: 0 12px;
   background: transparent;
-  border: 0;
+  border: 2px solid transparent;
   border-radius: var(--radius-pill);
   color: var(--color-text-muted);
   font-weight: 600;
@@ -195,12 +247,14 @@ a {
 }
 
 .mode-button[aria-pressed="true"] {
-  background: var(--color-navy);
-  color: #FFFFFF;
+  background: var(--color-school-blue);
+  border-color: var(--color-school-blue);
+  color: var(--color-on-accent);
 }
 
 .mode-deep[aria-pressed="true"] {
   background: var(--color-yellow);
+  border-color: var(--color-navy);
   color: var(--color-navy);
 }
 
@@ -214,9 +268,9 @@ a {
 }
 
 .button-primary {
-  background: var(--color-navy);
+  background: var(--color-school-blue);
   border: 0;
-  color: #FFFFFF;
+  color: var(--color-on-accent);
 }
 
 .button-secondary {
@@ -264,7 +318,8 @@ a {
   border: var(--border-card);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
-  color: var(--color-navy);
+  border-color: var(--color-control-border);
+  color: var(--color-text);
   font-size: 14px;
   font-weight: 600;
   line-height: 1.3;
@@ -282,6 +337,7 @@ a {
   padding: 10px 14px;
   background: var(--surface-card);
   border: var(--border-card);
+  border-color: var(--color-control-border);
   border-left: 4px solid var(--color-sky);
   border-radius: var(--radius-control);
   text-align: left;
@@ -292,6 +348,7 @@ a {
   display: grid;
   gap: 2px;
   min-height: var(--touch);
+  border-color: var(--color-control-border);
   padding: 12px 14px;
   text-decoration: none;
 }
@@ -327,10 +384,11 @@ a {
   min-height: var(--tab-height);
   padding-bottom: env(safe-area-inset-bottom, 0px);
   background: var(--color-surface);
-  border-top: 1px solid var(--color-border);
+  border-top: 1px solid var(--color-control-border);
 }
 
 .tab {
+  --focus-offset: -2px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -344,8 +402,8 @@ a {
 }
 
 .tab[aria-current="page"] {
-  color: var(--color-navy);
-  border-top-color: var(--color-navy);
+  color: var(--color-school-blue);
+  border-top-color: var(--color-school-blue);
 }
 
 .visually-hidden {
@@ -387,9 +445,9 @@ a {
   min-height: var(--touch);
   padding: 0 12px;
   background: var(--surface-input);
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-control-border);
   border-radius: var(--radius-control);
-  color: var(--color-navy);
+  color: var(--color-text);
   font: inherit;
 }
 
@@ -437,9 +495,9 @@ a {
   max-width: 85%;
   padding: 10px 14px;
   background: var(--color-surface);
-  border: 1px solid var(--color-border);
+  border: var(--border-card);
   border-radius: var(--radius-card) var(--radius-card) var(--radius-card) 4px;
-  box-shadow: none;
+  box-shadow: var(--shadow-guided);
 }
 
 .answer-card[data-status="failed"] {
@@ -457,7 +515,7 @@ a {
 
 .answer-notice {
   padding: 10px 12px;
-  background: var(--color-paper);
+  background: var(--color-coral);
   border-radius: var(--radius-control);
   color: var(--color-navy);
 }
@@ -543,7 +601,7 @@ a {
 
 .citation-meta {
   margin: 0;
-  color: var(--color-navy);
+  color: var(--color-text);
   font-size: 14px;
   font-weight: 700;
 }
@@ -673,7 +731,7 @@ a {
 }
 
 .grad-ring-earned {
-  color: var(--color-navy);
+  color: var(--color-text);
   font-size: 34px;
   font-weight: 800;
 }
@@ -693,7 +751,7 @@ a {
   background: var(--color-paper);
   border: 1px solid var(--color-border);
   border-radius: var(--radius-pill);
-  color: var(--color-navy);
+  color: var(--color-text);
   font-size: 14px;
   font-weight: 700;
 }
@@ -703,13 +761,13 @@ a {
 }
 
 .grad-badge[data-status="met"] {
-  background: #E6F6FC;
+  background: var(--color-sky);
   border-color: var(--color-sky);
-  color: var(--color-school-blue);
+  color: var(--color-navy);
 }
 
 .grad-badge[data-status="short"] {
-  background: #FFF8D6;
+  background: var(--color-yellow);
   border-color: var(--color-yellow);
   color: var(--color-navy);
 }
@@ -792,7 +850,7 @@ a {
 }
 
 .grad-item-title {
-  color: var(--color-navy);
+  color: var(--color-text);
   font-weight: 700;
 }
 
@@ -810,7 +868,7 @@ a {
 
 .grad-tag {
   justify-self: start;
-  color: var(--color-school-blue);
+  color: var(--color-sky-text);
   font-size: 13px;
   font-weight: 700;
 }
@@ -863,10 +921,90 @@ a {
   border-left: 4px solid var(--color-sky);
 }
 
+[data-demo-form] :is(select, button),
+.calendar-controls select {
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0 10px;
+  background: var(--surface-input);
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  font: inherit;
+}
+
+[data-demo-form] button:not(:disabled) {
+  cursor: pointer;
+}
+
+.calendar-event a {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-height: var(--touch);
+}
+
 /* 더보기 · PWA 설치 안내. 조작 요소 없는 정적 카드이고 홈 구역의 간격·카드를 그대로 쓴다. */
 .more {
   display: grid;
   gap: 24px;
+}
+
+.appearance-card {
+  display: grid;
+  gap: var(--gap);
+  padding: 14px var(--gap);
+}
+
+.appearance-group {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.appearance-group legend {
+  margin-bottom: 8px;
+  padding: 0;
+  font-weight: 700;
+}
+
+.appearance-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.appearance-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: var(--touch);
+  min-width: var(--touch);
+  padding: 4px 8px;
+  background: var(--surface-input);
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.appearance-option input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: var(--color-school-blue);
+}
+
+.appearance-option:has(input:checked) {
+  border-color: var(--color-school-blue);
+  background: var(--color-school-blue);
+  color: var(--color-on-accent);
+}
+
+.appearance-option input:checked {
+  accent-color: var(--color-on-accent);
+  --focus-offset: 0px;
+  --focus-color: var(--color-on-accent);
 }
 
 .install-lead,
@@ -888,7 +1026,7 @@ a {
 
 .install-title {
   margin: 0;
-  color: var(--color-navy);
+  color: var(--color-text);
   font-size: 16px;
 }
 
@@ -897,6 +1035,27 @@ a {
   gap: 6px;
   margin: 0;
   padding-left: 1.4em;
+}
+
+html[data-theme="neumorphic"] {
+  --border-card: 1px solid var(--color-control-border);
+  --shadow-card: var(--shadow-raised);
+  --shadow-guided: var(--shadow-raised);
+  --shadow-input: var(--shadow-recessed);
+}
+
+html[data-theme="neumorphic"] .tab-bar {
+  box-shadow: var(--shadow-raised);
+}
+
+html[data-theme="neumorphic"] :is(
+  .chat-select,
+  [data-demo-form] select,
+  .calendar-controls select,
+  .mode-button[aria-pressed="true"],
+  .appearance-option:has(input:checked)
+) {
+  box-shadow: var(--shadow-recessed);
 }
 
 @media (max-width: 380px) {
@@ -922,8 +1081,6 @@ a {
     transform: none;
   }
 }
-
-/* 뉴모피즘판(음각·양각) 자리. 설정 화면 이슈에서 html[data-theme="neumorphic"]에 값을 채운다. */
 
 /* 키보드 포커스. box-shadow는 카드·타일 그림자에 덮이므로 outline을 쓰고 파일 맨 끝에 둔다.
    이 규칙 뒤에 outline이나 포커스 규칙을 더하지 않는다. */

@@ -4,7 +4,8 @@
   <meta charset="utf-8">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://kumoh-campus.onrender.com; base-uri 'self'; form-action 'self'; object-src 'none'">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="theme-color" content="#0A2540">
+  <meta name="theme-color" content="#F5F8FC" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#0B1626" media="(prefers-color-scheme: dark)">
   <meta name="description" content="금오공대 학사 행정 AI 아이오(AIO)">
   <title>아이오 · 금오공대 학사 행정</title>
   <link rel="manifest" href="manifest.webmanifest">
@@ -43,6 +44,26 @@
     <section class="view" data-view="more" aria-labelledby="title-more" hidden>
       <h1 id="title-more" class="view-title" tabindex="-1">더보기</h1>
       <div class="more">
+        <section class="home-section" aria-labelledby="title-appearance">
+          <h2 id="title-appearance" class="section-title">화면 설정</h2>
+          <div class="card appearance-card">
+            <fieldset class="appearance-group">
+              <legend>색 모드</legend>
+              <div class="appearance-options">
+                <label class="appearance-option"><input type="radio" name="appearance-color" data-appearance="color" value="system" checked aria-checked="true">시스템</label>
+                <label class="appearance-option"><input type="radio" name="appearance-color" data-appearance="color" value="light" aria-checked="false">라이트</label>
+                <label class="appearance-option"><input type="radio" name="appearance-color" data-appearance="color" value="dark" aria-checked="false">다크</label>
+              </div>
+            </fieldset>
+            <fieldset class="appearance-group">
+              <legend>입체 효과</legend>
+              <div class="appearance-options">
+                <label class="appearance-option"><input type="radio" name="appearance-effect" data-appearance="effect" value="basic" checked aria-checked="true">기본</label>
+                <label class="appearance-option"><input type="radio" name="appearance-effect" data-appearance="effect" value="neumorphic" aria-checked="false">음각양각</label>
+              </div>
+            </fieldset>
+          </div>
+        </section>
         <section class="home-section" aria-labelledby="title-install">
           <h2 id="title-install" class="section-title">홈 화면에 아이오 설치하기</h2>
           <p class="install-lead">브라우저 메뉴에서 홈 화면에 추가하면 앱처럼 바로 열려요. 한 번 연 화면은 인터넷 없이도 열리지만, 답변과 일정은 연결이 필요해요.</p>

@@ -13,6 +13,7 @@ const files = ["./", "index.html", "manifest.webmanifest", "assets/app.css", "as
   "assets/home.mjs", "assets/router.mjs", "assets/config.mjs", "assets/api.mjs",
   "assets/chat-view.mjs", "assets/chat-client.mjs", "assets/chat-history.mjs",
   "assets/demo-login.mjs", "assets/graduation-view.mjs", "assets/calendar-view.mjs",
+  "assets/appearance.mjs",
   ...generatedIcons.keys()];
 const requireFullShell = process.env.AIO_REQUIRE_FULL_SHELL === "1";
 const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/home.mjs", "assets/router.mjs",
@@ -60,7 +61,7 @@ function worker(scope = "https://example.invalid/app/") {
       clients: { claim: async () => { calls.claimed += 1; } } },
     caches: { open: async (name) => { calls.opened.push(name); return cache; },
       keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4",
-        "aio-shell-v5", "unrelated"],
+        "aio-shell-v5", "aio-shell-v6", "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
     fetch: async (request) => { calls.fetched.push(request); return "network"; },
   });
@@ -121,16 +122,16 @@ test("precache files exist or are generated icons", async () => {
   }
 });
 
-test("activate removes v4 and older app caches and keeps CACHE_NAME v5", async () => {
+test("activate removes v5 and older app caches and keeps CACHE_NAME v6", async () => {
   const { events, calls } = worker();
   let pending;
   events.install({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.opened, ["aio-shell-v5"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v6"]);
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
   assert.deepEqual(calls.deleted,
-    ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4"]);
+    ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4", "aio-shell-v5"]);
   assert.equal(calls.claimed, 1);
 });
 
@@ -198,7 +199,7 @@ test("listed GET uses shell cache and falls back to network on miss", async () =
 });
 
 // app.js의 import 줄을 걷어 내고 모듈 함수를 스텁으로 넣어 부팅한다. 네트워크와 저장소는 쓰지 않는다.
-function bootApp(startRoute) {
+function bootApp(startRoute, storage = null) {
   const calls = { refresh: 0, calendarRefresh: 0, moves: [], students: 0, login: [], diagnosis: [] };
   const roots = new Map();
   const doc = {
@@ -227,6 +228,10 @@ function bootApp(startRoute) {
     createPrefStorage: () => ({}),
     mountChat: () => ({}),
     mountHome: () => ({}),
+    mountAppearance(opts) {
+      assert.equal(options.appearance, undefined, "mountAppearance runs only at boot");
+      options.appearance = opts;
+    },
     syncHomeMode() {},
     mountGraduationDiagnosis(opts) { options.diagnosis = opts; return diagnosis; },
     mountDemoLogin(opts) {
@@ -240,13 +245,31 @@ function bootApp(startRoute) {
     createRouter: ({ onRoute }) => {
       options.onRoute = onRoute;
       return {
-        start: () => onRoute({ route: startRoute }),
+        start() {
+          assert.ok(options.appearance, "appearance is ready before the initial route");
+          onRoute({ route: startRoute });
+        },
         navigate: (route, state) => calls.moves.push({ route, state }),
       };
+    },
+    get localStorage() {
+      if (storage === null) throw new Error("가상 저장소 접근 오류");
+      return storage;
     },
   });
   return { calls, roots, options, diagnosis, doc };
 }
+
+test("app restores appearance before the initial route even when storage access throws", () => {
+  const storage = {};
+  const available = bootApp("home", storage);
+  assert.equal(available.options.appearance.doc, available.doc);
+  assert.equal(available.options.appearance.storage, storage);
+  available.options.onRoute({ route: "more" });
+
+  const unavailable = bootApp("more");
+  assert.equal(unavailable.options.appearance.storage, null);
+});
 
 test("calendar tab mounts the calendar module once and refreshes on each entry", () => {
   const { calls, roots, options, doc } = bootApp("home");

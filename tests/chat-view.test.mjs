@@ -790,8 +790,9 @@ test("app.css: 채팅 규칙은 포커스 규칙 앞에 있고 터치 영역은 
   const guidedAt = css.indexOf('.answer-card[data-guided="true"] {');
   assert.ok(guidedAt > css.indexOf(".answer-card {") && guidedAt > css.indexOf(".card {"), "카드 규칙 뒤에서 덮어쓴다");
   const guided = css.slice(guidedAt, css.indexOf("}", guidedAt));
-  assert.match(guided, /box-shadow:\s*none/);
-  assert.match(guided, /border:\s*1px solid var\(--color-border\)/);
+  assert.match(guided, /box-shadow:\s*var\(--shadow-guided\)/);
+  assert.match(css, /--shadow-guided:\s*none/);
+  assert.match(guided, /border:\s*var\(--border-card\)/);
   assert.match(css, /@keyframes chat-pulse/);
   const reduced = css.indexOf("@media (prefers-reduced-motion: reduce)");
   assert.match(css.slice(reduced, reduced + 200), /animation: none !important/);
