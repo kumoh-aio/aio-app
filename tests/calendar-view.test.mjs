@@ -11,16 +11,28 @@ class Element {
     this.hidden = false;
     this.className = "";
     this._text = "";
+    this.style = {};
   }
   set textContent(value) { this._text = String(value); this.children = []; }
   get textContent() { return this._text + this.children.map((child) => child.textContent).join(""); }
   set innerHTML(value) { throw new Error("HTML 삽입 금지"); }
-  append(...nodes) { this.children.push(...nodes); }
+  append(...nodes) {
+    for (const node of nodes) node.parent = this;
+    this.children.push(...nodes);
+  }
+  remove() {
+    if (!this.parent) return;
+    this.parent.children = this.parent.children.filter((child) => child !== this);
+    this.parent = null;
+    if (Element.active === this) Element.active = null;
+  }
   replaceChildren(...nodes) { this._text = ""; this.children = nodes; }
   setAttribute(name, value) { this.attributes.set(name, String(value)); }
   getAttribute(name) { return this.attributes.get(name); }
   addEventListener(type, listener) { this.listeners.set(type, listener); }
-  dispatch(type) { return this.listeners.get(type)?.({ target: this }); }
+  dispatch(type, detail = {}) { return this.listeners.get(type)?.({ target: this, preventDefault() {}, ...detail }); }
+  focus() { Element.active = this; }
+  byClass(name) { return this.children.flatMap((child) => [...(child.className.split(" ").includes(name) ? [child] : []), ...child.byClass(name)]); }
   all(tag) { return this.children.flatMap((child) => [ ...(child.tagName === tag ? [child] : []), ...child.all(tag)]); }
 }
 
@@ -31,7 +43,8 @@ function setup(fetchImpl, options = {}) {
   const view = mountCalendar({ root, doc, initialYear: 2027, initialTerm: 1,
     fetchImpl: (url, init) => { calls.push({ url, init }); return fetchImpl(url, init); }, ...options });
   const [year, term] = root.all("select");
-  return { root, view, calls, year, term, status: root.children[1], retry: root.children[2], list: root.children[3] };
+  if (!options.calendar) root.byClass("calendar-viewswitch")[0].children[1].dispatch("click");
+  return { root, view, calls, year, term, status: root.byClass("status")[0], retry: root.byClass("button-secondary")[0], list: root.byClass("calendar-list")[0] };
 }
 
 const response = (events) => ({ ok: true, json: async () => ({ events }) });
@@ -84,7 +97,7 @@ test("2027/1 GET과 선택지, 4건 시작일순·기간·모든 출처와 확�
   assert.equal(s.calls[0].init.method, "GET");
   assert.equal(s.calls[0].init.credentials, "omit");
   assert.equal(s.calls[0].init.cache, "no-store");
-  assert.deepEqual(s.root.all("h3").map((node) => node.textContent), ["01", "02", "03", "04"].map((day) => `가상 대상 ${day}`));
+  assert.deepEqual(s.list.all("h3").map((node) => node.textContent), ["01", "02", "03", "04"].map((day) => `가상 대상 ${day}`));
   assert.equal(s.list.children.length, 4);
   for (const [index, card] of s.list.children.entries()) {
     const day = `0${index + 1}`;
@@ -95,9 +108,9 @@ test("2027/1 GET과 선택지, 4건 시작일순·기간·모든 출처와 확�
     }
     assert.ok(card.className.includes("calendar-event"));
   }
-  assert.deepEqual(s.root.all("a").map((link) => link.getAttribute("href")),
+  assert.deepEqual(s.list.all("a").map((link) => link.getAttribute("href")),
     ["01", "02", "03", "04"].flatMap((day) => event(day).sources.map((source) => source.url)));
-  for (const link of s.root.all("a")) {
+  for (const link of s.list.all("a")) {
     assert.equal(link.getAttribute("target"), "_blank");
     assert.equal(link.getAttribute("rel"), "noopener noreferrer");
   }
@@ -154,7 +167,7 @@ test("학기 변경 후 늦은 성공과 실패가 현재 목록을 덮지 않�
     if (lateFailure) old.reject(new TypeError("가상 이전 학기 실패"));
     else old.resolve(response([event("01", "가상 이전 학기")]));
     await first;
-    assert.deepEqual(s.root.all("h3").map((node) => node.textContent), ["가상 새 학기"]);
+    assert.deepEqual(s.list.all("h3").map((node) => node.textContent), ["가상 새 학기"]);
     assert.equal(s.status.hidden, true);
     assert.equal(s.retry.hidden, true);
   }
@@ -183,10 +196,91 @@ test("잘못된 시작일은 제외하고 HTTPS만 링크하며 서버 글자는
   ]));
   await s.view.refresh();
   assert.equal(s.list.children.length, 1);
-  assert.equal(s.root.all("h3")[0].textContent, safe.audience);
+  assert.equal(s.list.all("h3")[0].textContent, safe.audience);
   assert.equal(s.root.all("img").length, 0);
-  assert.equal(s.root.all("a").length, 2);
+  assert.equal(s.list.all("a").length, 2);
   assert.ok(s.root.textContent.includes("가상 비보안 출처 · 확인일 2027-01-03"));
+}));
+
+test("달력 기본 보기, 키보드 포커스와 메모리 탐색", () => withoutStorage(async () => {
+  const s = setup(async () => response([event("01"), event("02"), event("03"), event("04")]),
+    { calendar: true, today: "2027-03-31" });
+  await s.view.refresh();
+  const switcher = s.root.byClass("calendar-viewswitch")[0];
+  assert.equal(switcher.children[0].getAttribute("aria-pressed"), "true");
+  assert.equal(s.list.hidden, true);
+  const active = () => s.root.byClass("calendar-day").filter((cell) => cell.getAttribute("tabindex") === "0");
+  assert.equal(active().length, 1);
+  active()[0].dispatch("keydown", { key: "ArrowRight" });
+  assert.equal(active().length, 1);
+  assert.equal(Element.active, active()[0]);
+  assert.ok(active()[0].getAttribute("aria-label").startsWith("2027-04-01"));
+  assert.equal(s.root.byClass("calendar-month")[0].getAttribute("role"), "grid");
+  assert.ok(s.root.byClass("calendar-bar").length > 0);
+  assert.ok(s.root.byClass("calendar-dot").length > 0);
+  assert.ok(s.root.byClass("calendar-more").length > 0);
+  assert.equal(s.root.byClass("calendar-day-list")[0].all("h3").length, 4);
+  s.root.byClass("calendar-nav")[0].children[0].dispatch("click");
+  s.root.byClass("calendar-nav")[0].children[2].dispatch("click");
+  s.root.byClass("calendar-day")[10].dispatch("click");
+  assert.equal(Element.active, active()[0]);
+  switcher.children[1].dispatch("click");
+  assert.equal(s.list.hidden, false);
+  assert.equal(switcher.children[1].getAttribute("aria-pressed"), "true");
+  switcher.children[0].dispatch("click");
+  assert.equal(s.calls.length, 1);
+}));
+
+test("같은 날 시험·휴일 카드는 목록과 날짜별 목록에 분류 클래스를 붙임", () => withoutStorage(async () => {
+  const s = setup(async () => response([event("01", "가상 시험"), event("01", "가상 휴일")]),
+    { calendar: true, today: "2027-03-01" });
+  await s.view.refresh();
+  const assertCategories = (container) => {
+    for (const [category, audience] of [["exam", "가상 시험"], ["holiday", "가상 휴일"]]) {
+      const cards = container.byClass("calendar-cat-" + category).filter((node) => node.tagName === "article");
+      assert.equal(cards.length, 1);
+      assert.equal(cards[0].all("h3")[0].textContent, audience);
+    }
+  };
+  assertCategories(s.root.byClass("calendar-day-list")[0]);
+  s.root.byClass("calendar-viewswitch")[0].all("button").find((node) => node.textContent === "목록").dispatch("click");
+  assertCategories(s.list);
+  assert.equal(s.calls.length, 1);
+}));
+
+test("오늘이 범위 밖이면 첫 일정 월 선택", () => withoutStorage(async () => {
+  const s = setup(async () => response([event("02")]), { calendar: true, today: "2026-01-01" });
+  await s.view.refresh();
+  assert.equal(s.root.byClass("calendar-month-title")[0].textContent, "2027년 3월");
+  assert.ok(s.root.byClass("is-selected")[0].getAttribute("aria-label").startsWith("2027-03-02"));
+}));
+
+test("일~토 요일 머리 행이 날짜 행보다 먼저 표시됨", () => withoutStorage(async () => {
+  const s = setup(async () => response([event("01")]), { calendar: true });
+  await s.view.refresh();
+  const grid = s.root.byClass("calendar-month")[0];
+  const [weekdays] = grid.byClass("calendar-weekdays");
+  assert.equal(grid.children[0], weekdays);
+  assert.equal(weekdays.getAttribute("role"), "row");
+  assert.deepEqual(weekdays.children.map((header) => header.textContent), ["일", "월", "화", "수", "목", "금", "토"]);
+  assert.ok(weekdays.children.every((header) => header.getAttribute("role") === "columnheader"));
+}));
+
+test("이전·다음 달 버튼이 연속 실행 중에도 포커스를 유지함", () => withoutStorage(async () => {
+  const s = setup(async () => response([event("01")]), { calendar: true, today: "2027-03-01" });
+  await s.view.refresh();
+  const button = (label) => s.root.byClass("calendar-nav")[0].all("button").find((node) => node.textContent === label);
+  for (const [label, months] of [["다음 달", [4, 5]], ["이전 달", [4, 3]]]) {
+    const control = button(label);
+    control.focus();
+    for (const month of months) {
+      Element.active.dispatch("click");
+      assert.equal(button(label), control);
+      assert.equal(Element.active, control);
+      assert.equal(s.root.byClass("calendar-month-title")[0].textContent, "2027년 " + month + "월");
+    }
+  }
+  assert.equal(s.calls.length, 1);
 }));
 
 test("잘못된 응답 형식은 오류와 재시도 표시", () => withoutStorage(async () => {
