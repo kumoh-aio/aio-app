@@ -1,10 +1,11 @@
 const CACHE_PREFIX = "aio-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v5`;
+const CACHE_NAME = `${CACHE_PREFIX}v6`;
 const SHELL_FILES = [
   "./", "index.html", "manifest.webmanifest", "assets/app.css", "assets/app.js",
   "assets/home.mjs", "assets/router.mjs", "assets/config.mjs", "assets/api.mjs",
   "assets/chat-view.mjs", "assets/chat-client.mjs", "assets/chat-history.mjs",
   "assets/demo-login.mjs", "assets/graduation-view.mjs", "assets/calendar-view.mjs",
+  "assets/appearance.mjs",
   "assets/icons/icon-192.png", "assets/icons/icon-512.png",
 ];
 const shellUrls = SHELL_FILES.map((file) => new URL(file, self.registration.scope).href);

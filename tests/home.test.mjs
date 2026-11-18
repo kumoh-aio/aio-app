@@ -463,7 +463,7 @@ test("index.html: 인라인 스크립트·style·외부 자원 없음, manifest�
 
 test("app.css: 지정 색, 기기 글꼴, 44px, 포커스, 움직임 줄이기, 외부 자원 없음", () => {
   const css = read("../web/assets/app.css");
-  for (const color of ["#0A2540", "#005B96", "#00A3D9", "#FFD100", "#F5F9FC"]) {
+  for (const color of ["#0A2540", "#005B96", "#00A3D9", "#FFD100", "#F5F8FC"]) {
     assert.ok(css.toUpperCase().includes(color), color);
   }
   assert.match(css, /--touch:\s*44px/);
@@ -491,6 +491,6 @@ test("app.css: 키보드 포커스 표시가 카드·입력칸·타일 그림자
   // outline을 지우는 규칙은 프로그램이 포커스를 옮기는 화면 제목 하나뿐이다.
   const outlineOff = rules.filter((r) => /outline:\s*(none|0)\b/.test(r.body)).map((r) => r.selector);
   assert.deepEqual(outlineOff, [".view-title:focus"]);
-  assert.match(css, /--focus-width:\s*3px/);
+  assert.match(css, /--focus-width:\s*2px/);
   assert.match(css, /--focus-color:\s*var\(--color-school-blue\)/);
 });

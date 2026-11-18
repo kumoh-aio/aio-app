@@ -9,6 +9,7 @@ import { mountChat, createPrefStorage, syncHomeMode } from "./chat-view.mjs";
 import { mountDemoLogin } from "./demo-login.mjs";
 import { mountGraduationDiagnosis } from "./graduation-view.mjs";
 import { mountCalendar } from "./calendar-view.mjs";
+import { mountAppearance } from "./appearance.mjs";
 
 const fetchImpl = globalThis.fetch.bind(globalThis);
 const api = createApi({ base: API_BASE, fetchImpl });
@@ -23,6 +24,7 @@ function safeStorage() {
 }
 
 const storage = safeStorage();
+mountAppearance({ doc: document, storage });
 // 답변 모드·언어는 홈과 아이오가 같은 값을 보도록 메모리를 겸한 설정 저장소로 공유한다.
 // 대화 기록은 용량 오류를 직접 다뤄야 하므로 원래 저장소를 그대로 쓴다.
 const prefs = createPrefStorage(storage);
