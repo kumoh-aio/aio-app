@@ -397,9 +397,11 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
   assert.match(ring, /position:\s*fixed;\s*inset:\s*0;/);
   assert.match(ring, /pointer-events:\s*none/, "닫힌 링 레이어가 화면 누르기를 막지 않는다");
   assert.match(rule(".qa-items"), /top:\s*var\(--qa-origin-y, 0px\);\s*left:\s*var\(--qa-origin-x, 0px\);/);
-  // 크기 0 SVG는 그려지지 않으므로 장식 SVG는 화면 전체를 덮고, SVG 좌표를 화면 px로 쓴다.
+  // 크기 0 SVG는 그려지지 않으므로 장식 SVG는 화면 전체를 덮는다. viewBox 폭(innerWidth)은 세로 스크롤바를
+  // 포함하므로 100%(스크롤바 제외) 대신 같은 기준인 100vw·100dvh로 맞춰 채움이 축소되지 않게 한다.
   const goo = rule(".qa-goo");
-  assert.match(goo, /top:\s*0;\s*left:\s*0;\s*width:\s*100%;\s*height:\s*100%;/);
+  assert.match(goo, /top:\s*0;\s*left:\s*0;\s*width:\s*100vw;\s*height:\s*100vh;\s*height:\s*100dvh;/);
+  assert.doesNotMatch(goo, /(?:width|height):\s*100%/, "스크롤바를 뺀 폭은 viewBox와 어긋난다");
   assert.doesNotMatch(goo, /(?:^|[^-])(?:width|height):\s*0/, "장식 SVG viewport는 0이 아니다");
   assert.match(goo, /pointer-events:\s*none/);
   assert.match(goo, /opacity:\s*0/, "닫힌 링의 채움은 + 버튼을 가리지 않는다");
@@ -429,11 +431,28 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
   for (const selector of [".qa-blob", '.qa-ring[data-open="true"] .qa-blob']) {
     assert.doesNotMatch(rule(selector), /--qa-origin/, `${selector}는 원점을 다시 더하지 않는다`);
   }
+  // 가운데 원은 이동량을 0으로 고정해 열린 동안 트리거 중심에 남고, 버블을 + 자리에 잇는다.
+  assert.match(rule(".qa-blob[data-qa-hub]"), /--qa-x:\s*0px;\s*--qa-y:\s*0px;/);
   assert.match(rule('.qa-ring[data-open="true"] .qa-item'), /pointer-events:\s*auto/);
 
   const label = rule(".qa-label");
   assert.match(label, /pointer-events:\s*none/);
   assert.match(label, /white-space:\s*nowrap/);
+  assert.match(label, /--qa-label-center:\s*calc\(var\(--qa-origin-x, 0px\) \+ var\(--qa-x, 0px\)\);/);
+  assert.match(label, /max-width:\s*calc\(100vw - 8px\)/);
+  const shift = label.match(/transform:\s*translateX\(clamp\(([\s\S]+)\)\);/)?.[1].replace(/\s+/g, " ");
+  assert.equal(shift, "calc(4px - var(--qa-label-center)), -50%, calc(100vw - 4px - var(--qa-label-center) - 100%)",
+    "라벨은 가운데 정렬하되 화면 양끝 4px 안으로 밀어 넣는다");
+  // 320px 화면, 왼쪽 + 버튼의 첫 버블(중심 x 34px)에 너비 72px 라벨: 가운데 정렬이면 왼쪽 끝이 -2px라 잘린다.
+  const place = (center, width, viewport) => {
+    const offset = Math.max(4 - center, Math.min(-width / 2, viewport - 4 - center - width));
+    return [center + offset, center + offset + width];
+  };
+  for (const [center, width] of [[34, 72], [34, 140], [286, 72], [286, 140], [160, 72]]) {
+    const [left, right] = place(center, width, 320);
+    assert.ok(left >= 4 && right <= 316, `중심 ${center}px, 너비 ${width}px: ${left}~${right}`);
+  }
+  assert.deepEqual(place(160, 72, 320), [124, 196], "가운데 버블의 라벨은 가운데 정렬 그대로");
   assert.match(css, /html\[data-theme="neumorphic"\] \.qa-label\s*\{\s*box-shadow:\s*var\(--shadow-raised\)/);
 
   // 라벨·아이콘·경계 대비를 라이트·명시 다크·시스템 다크 모두에서 확인한다.
