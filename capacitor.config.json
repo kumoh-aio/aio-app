@@ -1,5 +1,10 @@
 {
   "appId": "edu.kumoh.aio",
   "appName": "아이오",
-  "webDir": "web"
+  "webDir": "web",
+  "plugins": {
+    "App": {
+      "disableBackButtonHandler": true
+    }
+  }
 }

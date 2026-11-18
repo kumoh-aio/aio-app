@@ -10,6 +10,7 @@ import { mountDemoLogin } from "./demo-login.mjs";
 import { mountGraduationDiagnosis } from "./graduation-view.mjs";
 import { mountCalendar } from "./calendar-view.mjs";
 import { mountAppearance } from "./appearance.mjs";
+import { createHandwritingPad } from "./handwriting-pad.mjs";
 
 const fetchImpl = globalThis.fetch.bind(globalThis);
 const api = createApi({ base: API_BASE, fetchImpl });
@@ -29,6 +30,10 @@ mountAppearance({ doc: document, storage });
 // 대화 기록은 용량 오류를 직접 다뤄야 하므로 원래 저장소를 그대로 쓴다.
 const prefs = createPrefStorage(storage);
 const homeRoot = document.getElementById("home-root");
+const handwriting = createHandwritingPad({
+  doc: document,
+  recognize: (request) => api.handwriting(request),
+});
 
 // 라우터보다 먼저 그려 둔다. 첫 화면이 #/aio여도 ask를 받을 수 있다.
 const chat = mountChat({
@@ -37,6 +42,7 @@ const chat = mountChat({
   storage: prefs,
   send: (request) => chatClient.send(request),
   history: createChatHistory({ storage }),
+  handwriting,
 });
 
 const diagnosis = mountGraduationDiagnosis({
@@ -66,6 +72,7 @@ let home = null;
 let firstRender = true;
 
 function showView({ route, state }) {
+  if (route !== "aio") handwriting.close();
   for (const view of document.querySelectorAll("[data-view]")) {
     view.hidden = view.getAttribute("data-view") !== route;
   }
