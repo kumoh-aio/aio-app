@@ -65,35 +65,94 @@ function statusError(status) {
   return error;
 }
 
-const chunkType = (bytes, at) => String.fromCharCode(bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]);
+const PNG_MAX_DIMENSION = 0x7fffffff;
+// 색 형식별로 허용하는 비트 깊이(PNG 명세 11.2.2 IHDR 표)
+const PNG_BIT_DEPTHS = Object.freeze({ 0: [1, 2, 4, 8, 16], 2: [8, 16], 3: [1, 2, 4, 8], 4: [8, 16], 6: [8, 16] });
+// 디코더가 알아야 하는 필수 청크. 이 밖의 필수(첫 글자 대문자) 청크가 나오면 디코더가 실패하므로 거부한다.
+const PNG_CRITICAL = new Set(["IHDR", "PLTE", "IDAT", "IEND"]);
+
+let crcTable = null;
+function crc32(bytes, start, end) {
+  if (!crcTable) {
+    crcTable = new Uint32Array(256);
+    for (let n = 0; n < 256; n += 1) {
+      let c = n;
+      for (let k = 0; k < 8; k += 1) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+      crcTable[n] = c >>> 0;
+    }
+  }
+  let crc = 0xffffffff;
+  for (let i = start; i < end; i += 1) crc = crcTable[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+const isLetter = (byte) => (byte >= 0x41 && byte <= 0x5a) || (byte >= 0x61 && byte <= 0x7a);
+const isUpper = (byte) => byte >= 0x41 && byte <= 0x5a;
+
+// IHDR 13바이트: 가로·세로 1~2^31-1, 색 형식에 맞는 비트 깊이, 압축 0, 필터 0, 인터레이스 0·1.
+function readHeader(view, at) {
+  const width = view.getUint32(at);
+  const height = view.getUint32(at + 4);
+  const depth = view.getUint8(at + 8);
+  const color = view.getUint8(at + 9);
+  if (width === 0 || height === 0 || width > PNG_MAX_DIMENSION || height > PNG_MAX_DIMENSION) return null;
+  if (!PNG_BIT_DEPTHS[color]?.includes(depth)) return null;
+  if (view.getUint8(at + 10) !== 0 || view.getUint8(at + 11) !== 0 || view.getUint8(at + 12) > 1) return null;
+  return { depth, color };
+}
 
 /**
- * PNG 구조를 확인한다: 서명 8바이트, 첫 청크 IHDR(길이 13, 가로·세로 0 초과),
- * IDAT 한 개 이상, 마지막 청크 IEND(길이 0)가 파일 끝과 정확히 맞아야 한다.
- * 청크 길이가 파일을 넘거나 IEND 뒤에 바이트가 남으면 거부한다. CRC는 서버가 디코딩할 때 확인한다.
+ * 서버에 보내기 전에 PNG 구조를 확인한다. 픽셀 압축을 풀지는 않는다.
+ * - 서명 8바이트, 청크마다 길이(2^31-1 이하)·영문자 형식·CRC 일치
+ * - 첫 청크 IHDR(readHeader 규칙), IHDR은 한 번만
+ * - PLTE는 IDAT 앞에 한 번까지, 길이는 3의 배수 3~768이고 색 형식 3은 필수, 0·4는 금지
+ * - IDAT는 하나 이상이며 이어서 나오고, 합친 데이터의 앞 2바이트가 사전 없는 zlib deflate 머리
+ * - 모르는 필수 청크 금지, IEND(길이 0)가 파일 끝과 정확히 맞아야 한다
  */
 export function isPngStructure(bytes) {
   if (!(bytes instanceof Uint8Array) || bytes.length < PNG_SIGNATURE.length) return false;
   if (PNG_SIGNATURE.some((byte, index) => bytes[index] !== byte)) return false;
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   let at = PNG_SIGNATURE.length;
-  let index = 0;
-  let sawData = false;
+  let header = null;
+  let palette = false;
+  let dataState = "before"; // before → inside → after
+  const zlibHead = [];
   while (at + 12 <= bytes.length) {
     const length = view.getUint32(at);
-    const type = chunkType(bytes, at + 4);
-    const end = at + 12 + length;
+    if (length > PNG_MAX_DIMENSION) return false;
+    const typeBytes = bytes.subarray(at + 4, at + 8);
+    if (!typeBytes.every(isLetter) || !isUpper(typeBytes[2])) return false;
+    const type = String.fromCharCode(...typeBytes);
+    const dataAt = at + 8;
+    const end = dataAt + length + 4;
     if (end > bytes.length) return false;
-    if (index === 0) {
-      if (type !== "IHDR" || length !== 13) return false;
-      if (view.getUint32(at + 8) === 0 || view.getUint32(at + 12) === 0) return false;
-    } else if (type === "IHDR") {
-      return false;
+    if (crc32(bytes, at + 4, dataAt + length) !== view.getUint32(dataAt + length)) return false;
+    if (!header && type !== "IHDR") return false;
+    if (isUpper(typeBytes[0]) && !PNG_CRITICAL.has(type)) return false;
+    if (dataState === "inside" && type !== "IDAT") dataState = "after";
+
+    if (type === "IHDR") {
+      if (header || length !== 13) return false;
+      header = readHeader(view, dataAt);
+      if (!header) return false;
+    } else if (type === "PLTE") {
+      if (palette || dataState !== "before" || header.color === 0 || header.color === 4) return false;
+      if (length % 3 !== 0 || length < 3 || length > 768) return false;
+      if (header.color === 3 && length / 3 > 2 ** header.depth) return false;
+      palette = true;
+    } else if (type === "IDAT") {
+      if (dataState === "after") return false;
+      if (header.color === 3 && !palette) return false;
+      dataState = "inside";
+      for (let i = 0; i < length && zlibHead.length < 2; i += 1) zlibHead.push(bytes[dataAt + i]);
+    } else if (type === "IEND") {
+      if (length !== 0 || dataState === "before" || end !== bytes.length) return false;
+      const [cmf, flg] = zlibHead;
+      if (zlibHead.length < 2 || (cmf & 0x0f) !== 8 || cmf >> 4 > 7) return false;
+      return ((cmf << 8) | flg) % 31 === 0 && (flg & 0x20) === 0;
     }
-    if (type === "IDAT") sawData = true;
-    if (type === "IEND") return length === 0 && sawData && end === bytes.length;
     at = end;
-    index += 1;
   }
   return false; // IEND 없이 끝났거나 마지막 청크가 잘렸다
 }

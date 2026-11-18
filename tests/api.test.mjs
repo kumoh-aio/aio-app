@@ -129,27 +129,44 @@ test("JSON body is serialized with content type and preserves HTTP status", asyn
 // ---- 손글씨 인식 ----
 
 const PNG_HEAD = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
-// 가상 PNG 청크: 길이 4바이트, 형식 4바이트, 데이터, CRC 자리 4바이트(앱은 CRC를 보지 않는다).
-const chunk = (type, data = new Uint8Array(0), length = data.length) => {
+// 앱 구현과 따로 계산하는 CRC-32(비트 단위). 형식 4바이트와 데이터를 덮는다.
+function testCrc(bytes) {
+  let crc = 0xffffffff;
+  for (const byte of bytes) {
+    crc ^= byte;
+    for (let k = 0; k < 8; k += 1) crc = crc & 1 ? (crc >>> 1) ^ 0xedb88320 : crc >>> 1;
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+// 가상 PNG 청크: 길이 4바이트, 형식 4바이트, 데이터, CRC 4바이트. length·crc를 주면 그 값으로 덮어쓴다.
+const chunk = (type, data = new Uint8Array(0), { length = data.length, crc } = {}) => {
   const bytes = new Uint8Array(12 + data.length);
-  new DataView(bytes.buffer).setUint32(0, length);
+  const view = new DataView(bytes.buffer);
+  view.setUint32(0, length);
   for (let i = 0; i < 4; i += 1) bytes[4 + i] = type.charCodeAt(i);
   bytes.set(data, 8);
+  view.setUint32(8 + data.length, crc ?? testCrc(bytes.subarray(4, 8 + data.length)));
   return bytes;
 };
-const ihdr = (width = 1, height = 1) => {
+const ihdr = ({ width = 1, height = 1, depth = 8, color = 0, compression = 0, filter = 0, interlace = 0 } = {}) => {
   const data = new Uint8Array(13);
   const view = new DataView(data.buffer);
   view.setUint32(0, width);
   view.setUint32(4, height);
-  data[8] = 8; // 비트 깊이
+  data.set([depth, color, compression, filter, interlace], 8);
   return chunk("IHDR", data);
+};
+const ZLIB = [0x78, 0x9c]; // 사전 없는 deflate 머리
+const idat = (size = 4, head = ZLIB) => {
+  const data = new Uint8Array(size);
+  data.set(head.slice(0, size));
+  return chunk("IDAT", data);
 };
 const IEND = chunk("IEND");
 const pngOf = (parts, type = "image/png") => new Blob([PNG_HEAD, ...parts], { type });
 const PNG_OVERHEAD = PNG_HEAD.length + 25 + 12 + 12; // 서명 + IHDR + 빈 IDAT + IEND
-// 구조가 맞는 가상 PNG. size를 주면 IDAT 데이터 길이로 맞춘다.
-const png = (size = 64, type = "image/png") => pngOf([ihdr(), chunk("IDAT", new Uint8Array(size - PNG_OVERHEAD)), IEND], type);
+// 구조가 맞는 가상 PNG(회색조 8비트). size를 주면 IDAT 데이터 길이로 맞춘다.
+const png = (size = 64, type = "image/png") => pngOf([ihdr(), idat(size - PNG_OVERHEAD), IEND], type);
 
 function handwritingApi(respond) {
   const calls = [];
@@ -223,24 +240,54 @@ test("handwriting network failure is not retried", async () => {
 
 test("handwriting rejects non-PNG and oversized images before fetch", async () => {
   const { api, calls } = handwritingApi(() => assert.fail("요청하면 안 된다"));
-  const idat = chunk("IDAT", new Uint8Array(4));
+  const data = idat();
   const zeroFilled = new Uint8Array(64);
   zeroFilled.set(PNG_HEAD);
+  const withHeader = (fields) => pngOf([ihdr(fields), data, IEND]);
+  const palette = (entries) => chunk("PLTE", new Uint8Array(entries * 3));
+  const text = chunk("tEXt", new Uint8Array(3));
+  const goodIdat = new Uint8Array(await png().arrayBuffer()).subarray(PNG_HEAD.length + 25, PNG_HEAD.length + 25 + 12 + 7);
+  const badCrc = Uint8Array.from(goodIdat);
+  badCrc[badCrc.length - 1] ^= 0xff;
   const invalid = {
     "not a blob": [undefined, null, "data:image/png;base64,", { type: "image/png", size: 10 }],
     "wrong MIME": [png(64, "image/jpeg"), png(64, "")],
     "bad signature": [new Blob([new Uint8Array(64)], { type: "image/png" }), new Blob([PNG_HEAD.slice(0, 4)], { type: "image/png" })],
     "signature only": [pngOf([])],
     "signature then zeros": [new Blob([zeroFilled], { type: "image/png" })],
-    "first chunk not IHDR": [pngOf([idat, IEND])],
-    "IHDR wrong length": [pngOf([chunk("IHDR", new Uint8Array(12)), idat, IEND])],
-    "zero width or height": [pngOf([ihdr(0, 1), idat, IEND]), pngOf([ihdr(1, 0), idat, IEND])],
-    "second IHDR": [pngOf([ihdr(), ihdr(), idat, IEND])],
+    "first chunk not IHDR": [pngOf([data, IEND]), pngOf([text, ihdr(), data, IEND])],
+    "IHDR wrong length": [pngOf([chunk("IHDR", new Uint8Array(12)), data, IEND])],
+    "zero width or height": [withHeader({ width: 0 }), withHeader({ height: 0 })],
+    "dimension over 2^31-1": [withHeader({ width: 0x80000000 }), withHeader({ height: 0xffffffff })],
+    "compression method not 0": [withHeader({ compression: 1 }), withHeader({ compression: 255 })],
+    "filter method not 0": [withHeader({ filter: 1 })],
+    "interlace not 0 or 1": [withHeader({ interlace: 2 })],
+    "unknown color type": [withHeader({ color: 1 }), withHeader({ color: 5 }), withHeader({ color: 7 })],
+    "bit depth not allowed for color": [withHeader({ depth: 3 }), withHeader({ color: 2, depth: 4 }),
+      withHeader({ color: 4, depth: 1 }), withHeader({ color: 6, depth: 2 })],
+    "palette rules": [
+      withHeader({ color: 3 }), // 색 형식 3인데 PLTE 없음
+      pngOf([ihdr(), palette(1), data, IEND]), // 회색조에 PLTE
+      pngOf([ihdr({ color: 4 }), palette(1), data, IEND]),
+      pngOf([ihdr({ color: 2 }), data, palette(1), IEND]), // IDAT 뒤 PLTE(트루컬러는 PLTE 선택)
+      pngOf([ihdr({ color: 3 }), palette(1), palette(1), data, IEND]),
+      pngOf([ihdr({ color: 3 }), chunk("PLTE", new Uint8Array(4)), data, IEND]),
+      pngOf([ihdr({ color: 3 }), palette(257), data, IEND]),
+      pngOf([ihdr({ color: 3, depth: 1 }), palette(3), data, IEND]), // 1비트는 2색까지
+    ],
+    "second IHDR": [pngOf([ihdr(), ihdr(), data, IEND])],
+    "IDAT not consecutive": [pngOf([ihdr(), data, text, data, IEND])],
+    "unknown critical or malformed chunk": [pngOf([ihdr(), chunk("ZZZZ"), data, IEND]),
+      pngOf([ihdr(), chunk("IDA1"), data, IEND]), pngOf([ihdr(), chunk("tExt"), data, IEND])], // 셋째 글자(예약 비트)는 대문자여야 한다
+    "bad CRC": [pngOf([ihdr(), badCrc, IEND]), pngOf([ihdr(), data, chunk("IEND", undefined, { crc: 0 })])],
+    "bad zlib header": [pngOf([ihdr(), idat(4, [0, 0]), IEND]), pngOf([ihdr(), idat(4, [0x79, 0x9c]), IEND]),
+      pngOf([ihdr(), idat(4, [0x78, 0x9d]), IEND]), pngOf([ihdr(), idat(4, [0x78, 0xbb]), IEND]),
+      pngOf([ihdr(), idat(1, [0x78]), IEND]), pngOf([ihdr(), idat(0), IEND])],
     "no IDAT": [pngOf([ihdr(), IEND])],
-    "no IEND": [pngOf([ihdr(), idat])],
-    "IEND with data": [pngOf([ihdr(), idat, chunk("IEND", new Uint8Array(1))])],
-    "bytes after IEND": [pngOf([ihdr(), idat, IEND, new Uint8Array(1)])],
-    "chunk longer than file": [pngOf([ihdr(), chunk("IDAT", new Uint8Array(4), 100), IEND])],
+    "no IEND": [pngOf([ihdr(), data])],
+    "IEND with data": [pngOf([ihdr(), data, chunk("IEND", new Uint8Array(1))])],
+    "bytes after IEND": [pngOf([ihdr(), data, IEND, new Uint8Array(1)])],
+    "chunk longer than file": [pngOf([ihdr(), chunk("IDAT", Uint8Array.from([0x78, 0x9c, 0, 0]), { length: 100 }), IEND])],
   };
   for (const [name, images] of Object.entries(invalid)) {
     for (const image of images) await assert.rejects(api.handwriting({ image }), { status: 415 }, name);
@@ -256,9 +303,17 @@ test("isPngStructure accepts IHDR, IDAT and IEND in order, also inside a larger 
   const padded = new Uint8Array(bytes.length + 6);
   padded.set(bytes, 3);
   assert.equal(isPngStructure(padded.subarray(3, 3 + bytes.length)), true, "byteOffset이 있어도 읽는다");
-  const split = new Uint8Array(await pngOf([ihdr(), chunk("tEXt", new Uint8Array(3)), chunk("IDAT", new Uint8Array(2)),
-    chunk("IDAT", new Uint8Array(2)), IEND]).arrayBuffer());
-  assert.equal(isPngStructure(split), true, "보조 청크와 여러 IDAT 허용");
+  const valid = async (parts) => isPngStructure(new Uint8Array(await pngOf(parts).arrayBuffer()));
+  assert.equal(await valid([ihdr(), chunk("tEXt", new Uint8Array(3)), idat(1, [0x78]), idat(3, [0x9c]), IEND]), true,
+    "보조 청크와 여러 IDAT, IDAT 경계에 걸친 zlib 머리 허용");
+  assert.equal(await valid([ihdr({ color: 3, depth: 1 }), chunk("PLTE", new Uint8Array(6)), idat(), IEND]), true, "팔레트 2색");
+  assert.equal(await valid([ihdr({ color: 3 }), chunk("PLTE", new Uint8Array(768)), idat(), IEND]), true, "팔레트 256색");
+  assert.equal(await valid([ihdr({ color: 2 }), chunk("PLTE", new Uint8Array(3)), idat(), IEND]), true, "트루컬러의 선택 PLTE");
+  assert.equal(await valid([ihdr({ color: 6, depth: 16, interlace: 1, width: 1024, height: 300 }), idat(), IEND]), true);
+  assert.equal(await valid([ihdr({ width: 0x7fffffff, height: 0x7fffffff }), idat(), IEND]), true, "명세 최대 크기");
+  for (const [color, depths] of [[0, [1, 2, 4, 8, 16]], [2, [8, 16]], [4, [8, 16]], [6, [8, 16]]]) {
+    for (const depth of depths) assert.equal(await valid([ihdr({ color, depth }), idat(), IEND]), true, `${color}/${depth}`);
+  }
   assert.equal(isPngStructure(bytes.subarray(0, bytes.length - 1)), false);
   assert.equal(isPngStructure(PNG_HEAD), false);
   assert.equal(isPngStructure([...bytes]), false, "Uint8Array만 받는다");
