@@ -83,6 +83,16 @@ class FakeElement {
     for (const fn of this.listeners.get(type) ?? []) fn(event);
     return event;
   }
+  // textarea의 setRangeText(text, start, end, "end")를 흉내 낸다.
+  setRangeText(text, start, end, selectMode) {
+    assert.equal(selectMode, "end");
+    this.value = this.value.slice(0, start) + text + this.value.slice(end);
+    this.selectionStart = this.selectionEnd = start + text.length;
+  }
+  dispatchEvent(event) {
+    for (const fn of this.listeners.get(event.type) ?? []) fn(event);
+    return true;
+  }
   focus() {
     this.ownerDocument.activeElement = this;
   }
@@ -198,10 +208,10 @@ function fakeSend(script = () => doneState()) {
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function mount({ storage = fakeStorage(), send = fakeSend().send, history = fakeHistory() } = {}) {
+function mount({ storage = fakeStorage(), send = fakeSend().send, history = fakeHistory(), handwriting } = {}) {
   const doc = fakeDocument();
   const root = doc.createElement("div");
-  const chat = mountChat({ root, doc, storage, send, history });
+  const chat = mountChat({ root, doc, storage, send, history, ...(handwriting ? { handwriting } : {}) });
   const q = {
     lang: () => root.find((n) => n.hasAttribute("data-lang")),
     mode: (value) => root.find((n) => n.getAttribute("data-mode") === value),
@@ -212,6 +222,7 @@ function mount({ storage = fakeStorage(), send = fakeSend().send, history = fake
     form: () => root.find((n) => n.tagName === "FORM" && !n.hasAttribute("data-edit-form")),
     input: () => root.find((n) => n.getAttribute("id") === "chat-input"),
     submit: () => root.find((n) => n.hasAttribute("data-chat-submit")),
+    pen: () => root.find((n) => n.tagName === "BUTTON" && n.className === "chat-pen"),
     users: () => root.findAll((n) => n.hasAttribute("data-question")),
     userItems: () => root.findAll((n) => n.getAttribute("data-turn") === "user"),
     cards: () => root.findAll((n) => n.hasAttribute("data-answer")),
@@ -1002,6 +1013,128 @@ test("v2 기록 복원: 고른 버전을 지키고, 손상된 버전을 걸러 �
   const labels = q.userItems().map((item) => controls(item, part));
   assert.deepEqual(labels.map((c) => [c.nav.hidden, c.label.textContent]),
     [[false, "2/2"], [false, "2/2"], [false, "2/2"], [true, "1/1"]]);
+});
+
+// ---- 손글씨 입력 ----
+
+// 가짜 패드: open 호출을 기록하고, 테스트가 onInsert를 직접 부른다.
+function fakePad() {
+  const opened = [];
+  return { opened, open: (options) => opened.push(options), close() {} };
+}
+
+function snapshotNode(node) {
+  return {
+    attrs: [...node.attributes.entries()].sort(),
+    listeners: [...node.listeners.keys()].sort(),
+    className: node.className,
+    style: node.style,
+  };
+}
+
+test("패드를 넘기지 않거나 open이 없으면 펜 버튼을 그리지 않는다", () => {
+  for (const handwriting of [undefined, {}, { open: "x" }]) {
+    const { root, q } = mount({ handwriting });
+    assert.equal(q.pen(), null);
+    const row = root.find((n) => n.className === "chat-form-row");
+    assert.deepEqual(row.children.map((n) => n.tagName), ["TEXTAREA", "BUTTON"]);
+  }
+});
+
+test("펜 버튼은 입력창과 보내기 사이의 이름 있는 대화 상자 버튼이다", () => {
+  const { root, q } = mount({ handwriting: fakePad() });
+  const row = root.find((n) => n.className === "chat-form-row");
+  const pen = q.pen();
+  assert.equal(row.children.length, 3);
+  assert.equal(row.children[0], q.input());
+  assert.equal(row.children[1], pen);
+  assert.equal(row.children[2], q.submit());
+  assert.equal(pen.getAttribute("type"), "button");
+  assert.equal(pen.getAttribute("aria-label"), "손글씨로 입력");
+  assert.equal(pen.getAttribute("aria-haspopup"), "dialog");
+  assert.equal(TEXT.pen, "손글씨로 입력");
+});
+
+test("손글씨는 누른 순간의 커서 위치에 들어가고 커서는 넣은 글 뒤, 전송하지 않는다", async () => {
+  const pad = fakePad();
+  const { send, calls } = fakeSend();
+  const { doc, q } = mount({ handwriting: pad, send });
+  q.lang().value = "en";
+  q.lang().dispatch("change");
+  const input = q.input();
+  input.value = "휴학 언제";
+  input.selectionStart = input.selectionEnd = 3;
+  q.pen().click();
+  assert.equal(pad.opened.length, 1);
+  assert.equal(pad.opened[0].trigger, q.pen());
+  assert.equal(pad.opened[0].lang, "en");
+  input.selectionStart = input.selectionEnd = 0; // 패드가 열린 뒤의 변화는 무시한다
+  pad.opened[0].onInsert("신청");
+  assert.equal(input.value, "휴학 신청언제");
+  assert.equal(input.selectionStart, 5);
+  assert.equal(input.selectionEnd, 5);
+  assert.equal(doc.activeElement, input);
+  await tick();
+  assert.equal(calls.length, 0, "자동 전송하지 않는다");
+  assert.equal(q.users().length, 0);
+});
+
+test("선택한 글은 손글씨로 바꾸고, 빈 질문 오류 표시는 넣은 뒤 사라진다", () => {
+  const pad = fakePad();
+  const { root, q } = mount({ handwriting: pad });
+  const input = q.input();
+  q.form().dispatch("submit");
+  const error = root.find((n) => n.getAttribute("id") === "chat-error");
+  assert.equal(error.hidden, false);
+  input.value = "가상 전공 질문";
+  input.selectionStart = 3;
+  input.selectionEnd = 5;
+  q.pen().click();
+  pad.opened[0].onInsert("교양");
+  assert.equal(input.value, "가상 교양 질문");
+  assert.equal(input.selectionEnd, 5);
+  assert.equal(error.hidden, true);
+  assert.equal(input.hasAttribute("aria-invalid"), false);
+  // 빈 글자나 문자열이 아닌 값은 넣지 않는다
+  pad.opened[0].onInsert("");
+  pad.opened[0].onInsert(null);
+  assert.equal(input.value, "가상 교양 질문");
+});
+
+test("커서 정보가 없으면 끝에 넣는다", () => {
+  const pad = fakePad();
+  const { q } = mount({ handwriting: pad });
+  q.input().value = "가상";
+  q.pen().click();
+  pad.opened[0].onInsert(" 질문");
+  assert.equal(q.input().value, "가상 질문");
+});
+
+test("손글씨로 넣은 질문도 보내면 타이핑과 같은 기록 규칙을 따른다", async () => {
+  const pad = fakePad();
+  const { send, calls } = fakeSend();
+  const history = fakeHistory();
+  const { q } = mount({ handwriting: pad, send, history });
+  q.pen().click();
+  pad.opened[0].onInsert("가상 손글씨 질문");
+  q.form().dispatch("submit");
+  await tick();
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].message, "가상 손글씨 질문");
+  assert.equal(history.stored.turns[0].versions[0].message, "가상 손글씨 질문");
+  assert.deepEqual(Object.keys(history.stored.turns[0].versions[0]).filter((k) => /handwriting|image|stroke/i.test(k)), []);
+});
+
+test("패드가 있어도 textarea에는 덮개·포인터 처리기·touch-action을 더하지 않는다", () => {
+  const plain = mount();
+  const withPad = mount({ handwriting: fakePad() });
+  assert.deepEqual(snapshotNode(withPad.q.input()), snapshotNode(plain.q.input()));
+  assert.deepEqual([...withPad.q.input().listeners.keys()], ["input"]);
+  assert.equal(withPad.q.input().children.length, 0);
+  const row = withPad.root.find((n) => n.className === "chat-form-row");
+  assert.equal(row.listeners.size, 0, "입력 줄에도 처리기를 두지 않는다");
+  const source = read("../web/assets/chat-view.mjs");
+  assert.doesNotMatch(source, /touch-action|touchAction|pointer(down|move|up)|addEventListener\("touch/);
 });
 
 // ---- 정적 파일 검사 ----
