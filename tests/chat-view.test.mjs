@@ -238,10 +238,10 @@ function fakeSend(script = () => doneState()) {
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function mount({ storage = fakeStorage(), send = fakeSend().send, history = fakeHistory(), handwriting, quickActions } = {}) {
+function mount({ storage = fakeStorage(), send = fakeSend().send, history = fakeHistory(), handwriting, quickActions, sendIcon } = {}) {
   const doc = fakeDocument();
   const root = doc.createElement("div");
-  const chat = mountChat({ root, doc, storage, send, history, handwriting, quickActions });
+  const chat = mountChat({ root, doc, storage, send, history, handwriting, quickActions, sendIcon });
   const q = {
     lang: () => root.find((n) => n.hasAttribute("data-lang")),
     mode: (value) => root.find((n) => n.getAttribute("data-mode") === value),
@@ -395,7 +395,7 @@ test("응답 중 갱신: 답이 쌓이고 교체되며 생각 과정은 기본 �
   assert.equal(card.getAttribute("data-status"), "streaming");
   assert.equal(card.getAttribute("aria-busy"), "true");
   assert.equal(part(item, "data-answer-status").textContent, TEXT.streaming);
-  assert.equal(q.submit().disabled, true);
+  assert.equal(q.submit().disabled, false);
   assert.ok(q.chips().every((c) => c.disabled));
 
   update({ status: "streaming", answer: "", thinking: "가상 생각", thinkingLabel: "" });
@@ -420,6 +420,141 @@ test("응답 중 갱신: 답이 쌓이고 교체되며 생각 과정은 기본 �
   assert.equal(card.getAttribute("aria-busy"), "false");
   assert.equal(part(item, "data-answer-status").hidden, true);
   assert.equal(q.submit().disabled, false);
+});
+
+for (const stage of ["streaming", "fallback"]) {
+  test(`응답 중단: ${stage} 요청을 끊고 폼을 제출하지 않으며 버튼에 포커스를 둔다`, async () => {
+    const gate = deferred();
+    const { send, calls } = fakeSend(({ onUpdate }) => {
+      onUpdate({ status: stage, answer: "가상 중간 답" });
+      return gate.promise;
+    });
+    const { chat, doc, history, q, root } = mount({ send });
+    const button = q.submit();
+    const label = button.children[0];
+    assert.ok(button.className.split(" ").includes("chat-send"));
+    assert.equal(label.tagName, "SPAN");
+    assert.equal(label.className, "chat-send-label");
+    assert.equal(label.textContent, "보내기");
+    assert.equal(button.getAttribute("data-state"), "send");
+    assert.equal(button.getAttribute("aria-label"), "보내기");
+    assert.equal(button.getAttribute("type"), "submit");
+
+    const done = chat.ask({ question: "가상 질문" });
+    assert.equal(button.disabled, false);
+    assert.equal(button.getAttribute("type"), "button");
+    assert.equal(button.getAttribute("data-state"), "stop");
+    assert.equal(button.getAttribute("aria-label"), "응답 중단");
+    assert.equal(label.textContent, "중단");
+
+    q.input().value = stage === "streaming" ? "가상 작성 중인 질문" : "";
+    let submissions = 0;
+    q.form().addEventListener("submit", () => { submissions += 1; });
+    q.form().dispatch("submit");
+    assert.equal(calls.length, 1, "받는 동안 폼을 직접 제출해도 질문을 보내지 않는다");
+    submissions = 0;
+    button.focus();
+    const click = button.dispatch("click");
+    // 클릭 처리에서 type이 submit으로 돌아왔을 때의 기본 동작을 흉내 낸다.
+    if (!click.defaultPrevented && button.getAttribute("type") === "submit") q.form().dispatch("submit");
+    assert.equal(click.defaultPrevented, true);
+    assert.equal(submissions, 0);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].signal.aborted, true);
+    assert.equal(root.getAttribute("aria-busy"), "false");
+    assert.equal(doc.activeElement, button);
+    assert.equal(q.submit(), button);
+    assert.equal(button.getAttribute("type"), "submit");
+    assert.equal(button.getAttribute("data-state"), "send");
+    assert.equal(button.getAttribute("aria-label"), "보내기");
+    assert.equal(label.textContent, "보내기");
+    assert.equal(q.input().value, stage === "streaming" ? "가상 작성 중인 질문" : "");
+    assert.equal(root.find((node) => node.getAttribute("id") === "chat-error").hidden, true);
+    assert.equal(q.status().hidden, false);
+    assert.equal(q.status().getAttribute("aria-live"), "polite");
+    assert.equal(q.status().textContent, "응답을 중단했습니다.");
+    assert.equal(history.calls.saved.length, 0);
+
+    gate.resolve(doneState());
+    await done;
+    assert.equal(q.status().textContent, "응답을 중단했습니다.");
+    assert.equal(history.calls.saved.length, 0);
+  });
+}
+
+test("중단한 첫 질문을 다시 묻는 동안 이전 요청의 늦은 갱신과 완료를 버린다", async () => {
+  const oldResult = deferred();
+  const newResult = deferred();
+  const { send, calls } = fakeSend((_, index) => [oldResult.promise, newResult.promise][index - 1]);
+  const history = fakeHistory({ initial: { sessionId: "virtual-start", turns: [] } });
+  const { chat, q, part, root } = mount({ send, history });
+  const oldDone = chat.ask({ question: "가상 질문", mode: "deep", lang: "en" });
+  calls[0].onUpdate({ status: "streaming", answer: "가상 중단 전 답" });
+  q.submit().dispatch("click");
+  const retry = part(q.items()[0], "data-retry");
+  assert.equal(retry.hidden, false);
+  retry.dispatch("click");
+  assert.equal(calls.length, 2);
+  assert.equal(calls[1].message, calls[0].message);
+  assert.equal(calls[1].mode, calls[0].mode);
+  assert.equal(calls[1].lang, calls[0].lang);
+  assert.equal(calls[1].sessionId, calls[0].sessionId);
+  assert.equal(calls[1].signal.aborted, false);
+  assert.equal(q.items().length, 1);
+
+  const latest = q.items()[0];
+  calls[1].onUpdate({ status: "streaming", answer: "가상 재전송 중간 답" });
+  calls[0].onUpdate({ status: "fallback", answer: "가상 지연 답" });
+  oldResult.resolve(doneState({ answer: "가상 만료 답", sessionId: "virtual-stale" }));
+  await oldDone;
+  assert.deepEqual(q.items(), [latest]);
+  assert.equal(part(latest, "data-answer-body").textContent, "가상 재전송 중간 답");
+  assert.equal(q.status().textContent, TEXT.streaming);
+  assert.equal(root.getAttribute("aria-busy"), "true");
+  assert.equal(q.submit().getAttribute("data-state"), "stop");
+  assert.equal(history.calls.saved.length, 0);
+
+  // 새 답에서 세션을 주지 않아도 이전 요청의 세션으로 바뀌지 않는다.
+  newResult.resolve(doneState({ answer: "가상 재전송 완료 답", sessionId: null }));
+  await tick();
+  assert.equal(part(latest, "data-answer-body").textContent, "가상 재전송 완료 답");
+  assert.equal(history.calls.saved.length, 1);
+  assert.equal(history.stored.sessionId, "virtual-start");
+  assert.deepEqual(history.stored.turns.map((turn) => turn.versions.map((entry) => entry.answer)), [["가상 재전송 완료 답"]]);
+});
+
+test("아이콘은 한 번 장착하고 응답 시작과 종료 순서대로 같은 버튼의 상태를 받는다", async () => {
+  const gate = deferred();
+  const calls = [];
+  let installed;
+  let children;
+  const sendIcon = (button) => {
+    calls.push("mount");
+    installed = button;
+    const icon = button.ownerDocument.createElementNS("http://www.w3.org/2000/svg", "svg");
+    button.append(icon);
+    children = [...button.children];
+    return {
+      setStopping(on) {
+        calls.push(on);
+        assert.equal(button.getAttribute("data-state"), on ? "stop" : "send");
+      },
+    };
+  };
+  const { send } = fakeSend((_, index) => index === 1 ? gate.promise : doneState());
+  const { chat, q } = mount({ sendIcon, send });
+  assert.deepEqual(calls, ["mount"]);
+  assert.equal(installed, q.submit());
+  const done = chat.ask({ question: "가상 중단 질문" });
+  q.submit().dispatch("click");
+  gate.resolve(doneState());
+  await done;
+  await chat.ask({ question: "가상 완료 질문" });
+  assert.deepEqual(calls, ["mount", true, false, true, false]);
+  assert.equal(q.submit(), installed);
+  assert.equal(installed.children.length, children.length);
+  for (const [index, child] of children.entries()) assert.equal(installed.children[index], child);
+  assert.equal(children[0].textContent, "보내기");
 });
 
 test("근거 조문 카드: 문서명·조문·시행일·인용, 원문 보기는 https일 때만 noopener", async () => {
@@ -1067,6 +1202,46 @@ test("수정·다시 답하기가 실패하거나 취소되면 직전 완료 버
   assert.equal(part(second, "data-answer-body").textContent, "가상 답 둘");
   assert.deepEqual(q.users().map((u) => u.textContent), ["가상 질문 하나", "가상 질문 둘", "가상 질문 셋"]);
   assert.deepEqual(history.stored.turns.map((t) => [t.selectedVersion, t.versions.length]), [[0, 1], [0, 1], [0, 1]]);
+});
+
+test("앞 버전을 골라 질문을 수정하다 중단하면 그 질문과 답이 복원된다", async () => {
+  const initial = { sessionId: "virtual-session", turns: [
+    { selectedVersion: 1, versions: [version("가상 첫 질문", "가상 첫 답"), version("가상 둘째 질문", "가상 둘째 답")] },
+  ] };
+  const gate = deferred();
+  const { send, calls } = fakeSend(({ onUpdate }) => {
+    onUpdate({ status: "streaming", answer: "가상 수정 중간 답" });
+    return gate.promise;
+  });
+  const history = fakeHistory({ initial });
+  const { q, part } = mount({ send, history });
+  const c = controls(q.userItems()[0], part);
+  c.prev.dispatch("click");
+  assert.equal(c.label.textContent, "1/2");
+  const savedBeforeEdit = structuredClone(history.stored);
+  const savesBeforeEdit = history.calls.saved.length;
+
+  c.edit.dispatch("click");
+  c.input.value = "가상 수정 질문";
+  c.form.dispatch("submit");
+  const answer = part(q.items()[0], "data-answer-body");
+  assert.equal(q.users()[0].textContent, "가상 수정 질문");
+  assert.equal(answer.textContent, "가상 수정 중간 답");
+
+  q.submit().dispatch("click");
+  assert.equal(calls[0].signal.aborted, true);
+  assert.equal(q.users()[0].textContent, "가상 첫 질문");
+  assert.equal(answer.textContent, "가상 첫 답");
+  assert.equal(c.label.textContent, "1/2");
+  assert.equal(part(q.items()[0], "data-retry").hidden, true);
+  assert.equal(c.next.disabled, false);
+  assert.equal(q.status().textContent, "응답을 중단했습니다.");
+
+  gate.resolve(doneState({ answer: "가상 늦은 수정 답" }));
+  await tick();
+  assert.equal(answer.textContent, "가상 첫 답");
+  assert.equal(history.calls.saved.length, savesBeforeEdit);
+  assert.deepEqual(history.stored, savedBeforeEdit);
 });
 
 test("v2 기록 복원: 고른 버전을 지키고, 손상된 버전을 걸러 내면 고른 위치를 다시 맞춘다", () => {
