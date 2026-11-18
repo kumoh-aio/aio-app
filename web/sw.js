@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "aio-shell-";
-const CACHE_NAME = `${CACHE_PREFIX}v10`;
+const CACHE_NAME = `${CACHE_PREFIX}v11`;
 const SHELL_FILES = [
   "./", "index.html", "manifest.webmanifest", "assets/app.css", "assets/app.js",
   "assets/home.mjs", "assets/router.mjs", "assets/config.mjs", "assets/api.mjs",
@@ -7,7 +7,7 @@ const SHELL_FILES = [
   "assets/demo-login.mjs", "assets/graduation-view.mjs", "assets/calendar-view.mjs",
   "assets/calendar-grid.mjs", "assets/appearance.mjs",
   "assets/handwriting-pad.mjs", "assets/handwriting-geometry.mjs",
-  "assets/quick-actions.mjs",
+  "assets/quick-actions.mjs", "assets/selection-indicator.mjs",
   "assets/icons/icon-192.png", "assets/icons/icon-512.png",
 ];
 const shellUrls = SHELL_FILES.map((file) => new URL(file, self.registration.scope).href);
@@ -31,7 +31,23 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || url.origin !== new URL(self.registration.scope).origin
       || url.pathname.includes("/api/") || !shellUrls.includes(url.href)) return;
   event.respondWith((async () => {
-    const cache = await caches.open(CACHE_NAME);
-    return await cache.match(request) || fetch(request);
+    let response;
+    try {
+      response = await fetch(request, { cache: "no-cache" });
+    } catch (error) {
+      const cache = await caches.open(CACHE_NAME);
+      const fallback = await cache.match(request);
+      if (fallback) return fallback;
+      throw error;
+    }
+    if (response.ok) {
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(request, response.clone());
+      } catch {
+        // A cache write failure must not discard a successful network response.
+      }
+    }
+    return response;
   })());
 });

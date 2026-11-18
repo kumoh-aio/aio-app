@@ -20,8 +20,10 @@ import { FAQ, MODE_STORAGE_KEY, mountHome } from "../web/assets/home.mjs";
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 // ---- 가짜 DOM: chat-view.mjs가 쓰는 만큼만 흉내 낸다. innerHTML은 쓰면 실패한다. ----
-class FakeStyle {
-  setProperty() {}
+class FakeStyle extends Map {
+  setProperty(name, value) {
+    this.set(name, value);
+  }
 }
 
 class FakeElement {
@@ -106,7 +108,13 @@ class FakeElement {
     this.dispatch("click");
   }
   getBoundingClientRect() {
-    return { left: 16, top: 550, width: 48, height: 48 };
+    for (let node = this; node; node = node.parentElement) {
+      if (node.hidden) return { left: 0, right: 0, width: 0 };
+    }
+    if (this.className === "mode-group") return { left: 10, right: 140, width: 130 };
+    if (this.getAttribute("data-mode") === "fast") return { left: 12, right: 64, width: 52 };
+    if (this.getAttribute("data-mode") === "deep") return { left: 68.25, right: 138, width: 69.75 };
+    return { left: 16, right: 64, top: 550, width: 48, height: 48 };
   }
   contains(node) {
     return [...this.walk()].includes(node);
@@ -138,6 +146,7 @@ function fakeDocument() {
       innerWidth: 320, innerHeight: 640,
       addEventListener() {},
       matchMedia: () => ({ matches: true }),
+      getComputedStyle: () => ({ borderLeftWidth: "1px", borderRightWidth: "1px" }),
     },
   };
   doc.createElement = (tag) => new FakeElement(doc, tag);
@@ -756,11 +765,11 @@ for (const [name, real] of [["정상 저장소", () => fakeStorage()], ["쓰기 
     assert.equal(home.mode, "fast");
 
     chatRoot.find((n) => n.getAttribute("data-mode") === "deep").dispatch("click"); // 아이오에서 깊이 생각
-    assert.equal(syncHomeMode({ home, root: homeRoot, storage: prefs }), true); // 홈으로 돌아옴
+    assert.equal(syncHomeMode({ home, storage: prefs }), true); // 홈으로 돌아옴
     assert.equal(home.mode, "deep");
     assert.equal(homeButton("deep").getAttribute("aria-pressed"), "true");
     assert.equal(homeButton("fast").getAttribute("aria-pressed"), "false");
-    assert.equal(syncHomeMode({ home, root: homeRoot, storage: prefs }), false, "이미 같으면 건드리지 않는다");
+    assert.equal(syncHomeMode({ home, storage: prefs }), false, "이미 같으면 모드를 유지한다");
 
     homeRoot.find((n) => n.hasAttribute("data-faq")).dispatch("click"); // 홈에서 질문
     assert.equal(moves.at(-1).mode, "deep");
@@ -774,8 +783,46 @@ for (const [name, real] of [["정상 저장소", () => fakeStorage()], ["쓰기 
 }
 
 test("syncHomeMode는 홈이나 저장값이 없으면 아무것도 하지 않는다", () => {
-  assert.equal(syncHomeMode({ home: null, root: null, storage: fakeStorage({ [MODE_STORAGE_KEY]: "deep" }) }), false);
-  assert.equal(syncHomeMode({ home: { mode: "fast" }, root: null, storage: fakeStorage() }), false);
+  assert.equal(syncHomeMode({ home: null, storage: fakeStorage({ [MODE_STORAGE_KEY]: "deep" }) }), false);
+  assert.equal(syncHomeMode({ home: { mode: "fast" }, storage: fakeStorage() }), false);
+});
+
+test("아이오에서 연속으로 고른 답변 모드를 다시 열 때도 같은 위치에 표시한다", () => {
+  const { q, root, chat } = mount();
+  const fast = q.mode("fast");
+  const deep = q.mode("deep");
+  const group = fast.parentElement;
+  for (const button of [deep, fast, deep, fast]) button.dispatch("click");
+  assert.equal(group.getAttribute("data-indicator-dir"), "back");
+  assert.equal(group.style.get("--indicator-left"), "1px");
+  assert.equal(group.style.get("--indicator-right"), "75px");
+  assert.equal(fast.getAttribute("aria-pressed"), "true");
+  assert.equal(deep.getAttribute("aria-pressed"), "false");
+
+  const placements = [];
+  const write = group.style.setProperty.bind(group.style);
+  group.style.setProperty = (name, value) => {
+    placements.push(group.getAttribute("data-indicator"));
+    write(name, value);
+  };
+  fast.dispatch("click");
+  assert.deepEqual(placements, []);
+  assert.equal(group.getAttribute("data-indicator-dir"), "back");
+
+  q.lang().value = "en";
+  q.lang().dispatch("change");
+  assert.deepEqual(placements.splice(0), ["instant", "instant"]);
+
+  root.hidden = true;
+  chat.refresh();
+  assert.equal(group.hasAttribute("data-indicator"), false);
+  root.hidden = false;
+  chat.refresh();
+  assert.deepEqual(placements, ["instant", "instant"]);
+  assert.equal(group.getAttribute("data-indicator"), "ready");
+  assert.equal(group.style.get("--indicator-left"), "1px");
+  assert.equal(group.style.get("--indicator-right"), "75px");
+  assert.equal(fast.getAttribute("aria-pressed"), "true");
 });
 
 test("추천 칩은 현재 모드·언어로 질문한다", async () => {
@@ -1254,7 +1301,7 @@ test("app.js는 takePendingAsk 없이 showView에서 chat.ask를 부르고 chat-
   assert.match(source, /const prefs = createPrefStorage\(storage\)/);
   assert.match(source, /createChatHistory\(\{\s*storage\s*\}\)/, "기록은 원래 저장소를 쓴다");
   assert.equal([...source.matchAll(/storage: prefs/g)].length, 3, "홈·아이오·홈 동기화가 같은 설정 저장소를 쓴다");
-  assert.match(source, /if \(route === "home"\) syncHomeMode\(\{ home, root: homeRoot, storage: prefs \}\)/);
+  assert.match(source, /if \(route === "home"\) syncHomeMode\(\{ home, storage: prefs \}\)/);
   assert.match(source, /import\s*\{\s*createChatClient\s*\}\s*from\s*"\.\/chat-client\.mjs"/);
   assert.match(source, /import\s*\{\s*createChatHistory\s*\}\s*from\s*"\.\/chat-history\.mjs"/);
   assert.match(source, /route === "aio" && state\) chat\.ask\(state\)/);

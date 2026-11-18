@@ -4,6 +4,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import vm from "node:vm";
 import { inflateSync } from "node:zlib";
 import { ICON_SIZES, iconPng } from "../tools/make-icons.mjs";
+import { createSelectionIndicator } from "../web/assets/selection-indicator.mjs";
 const webRoot = new URL("../web/", import.meta.url);
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url));
 const generatedIcons = new Map([
@@ -15,7 +16,7 @@ const files = ["./", "index.html", "manifest.webmanifest", "assets/app.css", "as
   "assets/demo-login.mjs", "assets/graduation-view.mjs", "assets/calendar-view.mjs",
   "assets/calendar-grid.mjs", "assets/appearance.mjs",
   "assets/handwriting-pad.mjs", "assets/handwriting-geometry.mjs",
-  "assets/quick-actions.mjs",
+  "assets/quick-actions.mjs", "assets/selection-indicator.mjs",
   ...generatedIcons.keys()];
 const requireFullShell = process.env.AIO_REQUIRE_FULL_SHELL === "1";
 const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/home.mjs", "assets/router.mjs",
@@ -53,7 +54,7 @@ function assertFile(file) {
   assert.ok(statSync(file, { throwIfNoEntry: false })?.isFile(), `Missing cache file: ${file.pathname}`);
 }
 
-function worker(scope = "https://example.invalid/app/") {
+function worker(scope = "https://example.invalid/app/", fetchResponse = () => "network") {
   const events = {};
   const calls = { opened: [], deleted: [], added: [], fetched: [], claimed: 0 };
   const cache = { addAll: async (urls) => calls.added.push(...urls), match: async () => "cached" };
@@ -63,9 +64,13 @@ function worker(scope = "https://example.invalid/app/") {
       clients: { claim: async () => { calls.claimed += 1; } } },
     caches: { open: async (name) => { calls.opened.push(name); return cache; },
       keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4",
-        "aio-shell-v5", "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10", "unrelated"],
+        "aio-shell-v5", "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10",
+        "aio-shell-v11", "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
-    fetch: async (request) => { calls.fetched.push(request); return "network"; },
+    fetch: async (request, options) => {
+      calls.fetched.push({ request, cache: options?.cache });
+      return fetchResponse(request);
+    },
   });
   return { events, calls, cache };
 }
@@ -124,19 +129,17 @@ test("precache files exist or are generated icons", async () => {
   }
 });
 
-test("activate removes v0 through v9 app caches and preserves v10 and unrelated caches", async () => {
+test("activate removes v0 through v10 app caches and preserves v11 and unrelated caches", async () => {
   const { events, calls } = worker();
   let pending;
   events.install({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.opened, ["aio-shell-v10"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v11"]);
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
   assert.deepEqual(calls.deleted,
     ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4", "aio-shell-v5",
-      "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9"]);
-  assert.ok(!calls.deleted.includes("aio-shell-v10"));
-  assert.ok(!calls.deleted.includes("unrelated"));
+      "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10"]);
   assert.equal(calls.claimed, 1);
 });
 
@@ -201,21 +204,75 @@ test("Android packages the pinned App plugin with its license and preserves defa
   assert.match(workflow, /cp node_modules\/@capacitor\/app\/LICENSE android\/app\/src\/main\/assets\/licenses\/Capacitor-App-MIT\.txt/);
 });
 
-test("listed GET uses shell cache and falls back to network on miss", async () => {
-  const { events, calls, cache } = worker();
-  const request = { url: "https://example.invalid/app/index.html", method: "GET" };
+function fetchShell(events, request) {
   let pending;
-  const event = { request, respondWith: (promise) => { pending = promise; } };
-  events.fetch(event);
-  assert.equal(await pending, "cached");
+  events.fetch({ request, respondWith: (promise) => { pending = promise; } });
+  return pending;
+}
+
+test("listed CSS GET refreshes the old shell entry for the next offline load", async () => {
+  const freshCss = new Response(".tab-bar::before { content: ''; }");
+  const staleCss = new Response(".tab-bar { display: grid; }");
+  const request = { url: "https://example.invalid/app/assets/app.css", method: "GET" };
+  const entries = new Map([[request.url, staleCss]]);
+  let online = true;
+  const { events, calls, cache } = worker(undefined, () => {
+    if (!online) throw new TypeError("offline");
+    return freshCss;
+  });
+  cache.match = async (key) => entries.get(key.url);
+  cache.put = async (key, response) => {
+    assert.notEqual(response, freshCss);
+    entries.set(key.url, response);
+  };
+
+  assert.equal(await fetchShell(events, request), freshCss);
+  assert.equal(await freshCss.text(), ".tab-bar::before { content: ''; }");
+  assert.deepEqual(calls.fetched, [{ request, cache: "no-cache" }]);
+
+  online = false;
+  const offlineCss = await fetchShell(events, request);
+  assert.equal(await offlineCss.text(), ".tab-bar::before { content: ''; }");
+  assert.deepEqual(calls.opened, ["aio-shell-v11", "aio-shell-v11"]);
+});
+
+test("a shell cache write failure still returns the online response", async () => {
+  const fresh = new Response("updated");
+  const { events, calls, cache } = worker(undefined, () => fresh);
+  cache.put = async () => { throw new Error("cache quota exceeded"); };
+  cache.match = async () => assert.fail("a successful fetch needs no fallback");
+  const request = { url: "https://example.invalid/app/index.html", method: "GET" };
+  assert.equal(await fetchShell(events, request), fresh);
+  assert.deepEqual(calls.opened, ["aio-shell-v11"]);
+});
+
+test("listed GET falls back to the shell cache only when fetch rejects", async () => {
+  const offline = new TypeError("offline");
+  const { events, calls, cache } = worker(undefined, () => { throw offline; });
+  const request = { url: "https://example.invalid/app/index.html", method: "GET" };
+  cache.match = async (key) => {
+    assert.equal(key, request);
+    assert.equal(calls.fetched.length, 1);
+    return "cached";
+  };
+  assert.equal(await fetchShell(events, request), "cached");
+  assert.deepEqual(calls.opened, ["aio-shell-v11"]);
+
   cache.match = async () => undefined;
-  events.fetch(event);
-  assert.equal(await pending, "network");
-  assert.equal(calls.fetched.length, 1);
+  await assert.rejects(fetchShell(events, request), (error) => error === offline);
+  assert.equal(calls.fetched.length, 2);
+});
+
+test("online HTTP errors do not fall back to a stale shell file", async () => {
+  const unavailable = new Response(null, { status: 503 });
+  const { events, calls } = worker(undefined, () => unavailable);
+  const request = { url: "https://example.invalid/app/index.html", method: "GET" };
+  assert.equal(await fetchShell(events, request), unavailable);
+  assert.deepEqual(calls.opened, []);
 });
 
 // app.js의 import 줄을 걷어 내고 모듈 함수를 스텁으로 넣어 부팅한다. 네트워크와 저장소는 쓰지 않는다.
-function bootApp(startRoute, storage = null) {
+function bootApp(startRoute, storage = null, { tabBar = null, tabs = [] } = {}) {
   const calls = { refresh: 0, calendarRefresh: 0, moves: [], students: 0, login: [], diagnosis: [], handwritingClose: 0, quickActionsClose: 0 };
   const roots = new Map();
   const doc = {
@@ -227,8 +284,8 @@ function bootApp(startRoute, storage = null) {
       });
       return roots.get(id);
     },
-    querySelectorAll: () => [],
-    querySelector: () => null,
+    querySelectorAll: (selector) => selector === "[data-tab]" ? tabs : [],
+    querySelector: (selector) => selector === ".tab-bar" ? tabBar : null,
   };
   const options = {};
   const diagnosis = { show() {}, clear() {} };
@@ -237,7 +294,7 @@ function bootApp(startRoute, storage = null) {
     API_BASE: "https://example.invalid",
     fetch: fetchStub,
     document: doc,
-    window: {},
+    window: tabBar?.ownerDocument.defaultView ?? {},
     navigator: {},
     createApi: () => ({
       demoStudents: async () => { calls.students += 1; return { students: [] }; },
@@ -247,6 +304,7 @@ function bootApp(startRoute, storage = null) {
     createChatClient: () => ({}),
     createChatHistory: () => ({}),
     createPrefStorage: () => ({}),
+    createSelectionIndicator: tabBar ? createSelectionIndicator : () => () => {},
     createHandwritingPad(opts) {
       options.handwriting = opts;
       return { open() {}, close() { calls.handwritingClose += 1; } };
@@ -287,6 +345,61 @@ function bootApp(startRoute, storage = null) {
   });
   return { calls, roots, options, diagnosis, doc };
 }
+
+test("rapid tab selections update the indicator and aria-current to the final tab", () => {
+  const ownerDocument = { defaultView: {
+    getComputedStyle: () => ({ borderLeftWidth: "0px", borderRightWidth: "0px" }),
+    addEventListener() {},
+  } };
+  const attributes = new Map();
+  const style = new Map();
+  const transitions = [];
+  const tabBar = {
+    ownerDocument,
+    getBoundingClientRect: () => ({ left: 12, right: 267, width: 255 }),
+    setAttribute(name, value) {
+      attributes.set(name, value);
+      if (name === "data-indicator") transitions.push(value);
+    },
+    style: { setProperty: (name, value) => style.set(name, value) },
+  };
+  const routes = ["home", "aio", "graduation", "calendar", "more"];
+  const tabs = routes.map((route, index) => {
+    const attributes = new Map([["data-tab", route]]);
+    const listeners = new Map();
+    return {
+      getBoundingClientRect: () => ({ left: 12 + index * 51, right: 63 + index * 51, width: 51 }),
+      setAttribute: (name, value) => attributes.set(name, value),
+      removeAttribute: (name) => attributes.delete(name),
+      getAttribute: (name) => attributes.get(name) ?? null,
+      addEventListener: (name, listener) => listeners.set(name, listener),
+      click: () => listeners.get("click")({ button: 0 }),
+    };
+  });
+  const { calls, options, roots } = bootApp("home", null, { tabBar, tabs });
+  assert.deepEqual([...style], [["--indicator-left", "0px"], ["--indicator-right", "204px"]]);
+  assert.deepEqual(transitions, ["instant", "ready"]);
+  for (const index of [3, 0, 4, 1]) {
+    tabs[index].click();
+    options.onRoute({ route: routes[index] });
+  }
+  assert.deepEqual([...style], [["--indicator-left", "51px"], ["--indicator-right", "153px"]]);
+  assert.equal(attributes.get("data-indicator-dir"), "back");
+  assert.equal(attributes.get("data-indicator"), "ready");
+  assert.deepEqual(transitions, ["instant", "ready"]);
+  assert.deepEqual(tabs.map((tab) => tab.getAttribute("aria-current")), [null, "page", null, null, null]);
+  assert.equal(calls.focused, roots.get("title-aio"));
+
+  tabs[1].click();
+  options.onRoute({ route: "aio" });
+  assert.deepEqual([...style], [["--indicator-left", "51px"], ["--indicator-right", "153px"]]);
+  assert.equal(attributes.get("data-indicator-dir"), "back");
+
+  transitions.length = 0;
+  options.onRoute({ route: "home" });
+  assert.deepEqual(transitions, ["instant", "ready"]);
+  assert.deepEqual(tabs.map((tab) => tab.getAttribute("aria-current")), ["page", null, null, null, null]);
+});
 
 test("quick actions navigate existing tabs and focus BISKIT after the route becomes visible", () => {
   const { calls, options, doc } = bootApp("aio");
