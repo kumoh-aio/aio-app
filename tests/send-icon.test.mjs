@@ -80,7 +80,7 @@ function mount(options = {}) {
   const button = new FakeNode("button");
   const label = new FakeNode("span");
   button.appendChild(label);
-  const icon = mountSendIcon(button, { doc, win: frames.win });
+  const icon = mountSendIcon(button, { doc, win: frames.win, stopping: options.stopping });
   const svg = button.children[1];
   const path = svg.children[0];
   return { ...frames, doc, button, label, svg, path, icon };
@@ -161,6 +161,22 @@ test("정지로 바뀌면 프레임마다 d를 보간하고 180ms에 정지 모�
   run(200);
   assert.equal(path.getAttribute("d"), SEND_PATH, "전송 모양으로 돌아온다");
   assert.equal(queue.size, 0);
+});
+
+test("응답 중에 늦게 붙으면 프레임 없이 정지 모양으로 시작하고 거기서 전송으로 돌아간다", () => {
+  // 움직임 줄이기 꺼짐, rAF 있음: 화살표 → 중간 → 정지로 보이면 안 된다
+  const { icon, path, queue, run } = mount({ stopping: true });
+  assert.deepEqual(path.dHistory, [STOP_PATH], "첫 프레임 전부터 정지 모양");
+  assert.equal(queue.size, 0);
+  icon.setStopping(true);
+  assert.equal(queue.size, 0, "같은 상태는 움직이지 않는다");
+  run(16);
+  assert.deepEqual(path.dHistory, [STOP_PATH]);
+  icon.setStopping(false);
+  run(90);
+  assert.equal(path.getAttribute("d"), dOf(lerpPoints(STOP_POINTS, SEND_POINTS, 0.875)));
+  run(90);
+  assert.equal(path.getAttribute("d"), SEND_PATH);
 });
 
 test("같은 방향을 다시 불러도 움직임을 다시 시작하지 않는다", () => {

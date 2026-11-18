@@ -49,9 +49,8 @@ function sendIcon(button) {
   };
   sendIconModule.then((module) => {
     if (typeof module?.mountSendIcon !== "function") return;
-    const mounted = module.mountSendIcon(button, { doc: document, win: window });
-    if (stopping) mounted.setStopping(true);
-    icon = mounted;
+    // 늦게 붙어도 지금 상태 모양을 바로 그린다. 붙인 뒤 setStopping을 부르면 화살표에서 정지로 모핑해 보인다.
+    icon = module.mountSendIcon(button, { doc: document, win: window, stopping });
   }).catch(() => {
     icon = null; // 아이콘을 붙이지 못하면 글자 버튼으로 남는다
   });

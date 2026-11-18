@@ -481,7 +481,7 @@ test("a pending send icon request never blocks boot and the factory keeps the te
   assert.doesNotMatch(source, /\bawait\b/, "boot awaits nothing");
 });
 
-test("a late send icon module mounts on the same button and receives the current stop state", async () => {
+test("a late send icon module mounts on the same button in the current stop shape", async () => {
   let release;
   const mounted = [];
   const states = [];
@@ -500,9 +500,11 @@ test("a late send icon module mounts on the same button and receives the current
   assert.equal(mounted[0].target, button);
   assert.equal(mounted[0].opts.doc, doc);
   assert.equal(typeof mounted[0].opts.win, "object");
-  assert.deepEqual(states, [true], "pending stop state is applied after mounting");
+  // 붙이는 순간의 상태로 그린다. 붙인 뒤 setStopping(true)를 부르면 화살표에서 정지로 모핑해 보인다.
+  assert.equal(mounted[0].opts.stopping, true, "mounts directly in the stop shape");
+  assert.deepEqual(states, [], "no morph from the arrow right after mounting");
   icon.setStopping(false);
-  assert.deepEqual(states, [true, false]);
+  assert.deepEqual(states, [false]);
   assert.equal(button.label.textContent, "보내기", "the hidden label still follows the state");
 });
 

@@ -34,22 +34,24 @@ const copyPoints = (points) => points.map(([x, y]) => [x, y]);
 
 /**
  * 버튼에 장식 SVG를 붙이고 { setStopping(on) }을 돌려준다. 버튼의 다른 자식과 속성은 건드리지 않는다.
+ * stopping은 붙이는 순간의 상태다. 응답 중에 늦게 붙어도 화살표에서 출발하지 않고 정지 모양을 바로 그린다.
  * @param {Element} button
- * @param {{ doc?: Document, win?: Window }} [options]
+ * @param {{ doc?: Document, win?: Window, stopping?: boolean }} [options]
  */
-export function mountSendIcon(button, { doc = button.ownerDocument, win = doc?.defaultView } = {}) {
+export function mountSendIcon(button, { doc = button.ownerDocument, win = doc?.defaultView, stopping = false } = {}) {
+  const initial = stopping ? STOP_POINTS : SEND_POINTS;
   const svg = doc.createElementNS(SVG_NS, "svg");
   for (const [name, value] of [["class", "chat-send-icon"], ["viewBox", "0 0 24 24"], ["width", "24"],
     ["height", "24"], ["aria-hidden", "true"], ["focusable", "false"]]) svg.setAttribute(name, value);
   const path = doc.createElementNS(SVG_NS, "path");
   path.setAttribute("fill", "currentColor");
-  path.setAttribute("d", SEND_PATH);
+  path.setAttribute("d", stopping ? STOP_PATH : SEND_PATH);
   svg.appendChild(path);
   button.appendChild(svg);
   button.setAttribute("data-icon", "morph");
 
-  let drawn = copyPoints(SEND_POINTS);
-  let target = SEND_POINTS;
+  let drawn = copyPoints(initial);
+  let target = initial;
   let frame = null;
   const clock = () => win?.performance?.now?.() ?? Date.now();
 
