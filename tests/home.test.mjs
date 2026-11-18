@@ -467,9 +467,30 @@ test("app.css: 지정 색, 기기 글꼴, 44px, 포커스, 움직임 줄이기, 
     assert.ok(css.toUpperCase().includes(color), color);
   }
   assert.match(css, /--touch:\s*44px/);
-  assert.match(css, /:focus-visible/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
   assert.match(css, /font-family:\s*var\(--font-body\)/);
   assert.match(css, /--font-body:\s*Pretendard/);
   assert.doesNotMatch(css, /@import|@font-face|url\(/i);
+});
+
+test("app.css: 키보드 포커스 표시가 카드·입력칸·타일 그림자에 덮이지 않는다", () => {
+  const css = read("../web/assets/app.css").replace(/\/\*[\s\S]*?\*\//g, "");
+  // 가장 안쪽 규칙만 뽑는다. @media 안의 규칙도 선택자 단위로 잡힌다.
+  const rules = [...css.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
+    selector: m[1].trim().replace(/^@media[^{]*$/, "").trim(),
+    body: m[2],
+  }));
+  const focusRules = rules.filter((r) => /:focus-visible/.test(r.selector));
+  assert.equal(focusRules.length, 1, "공통 포커스 규칙은 하나");
+  const [focus] = focusRules;
+  assert.equal(focus.selector, ":focus-visible");
+  assert.match(focus.body, /outline:\s*var\(--focus-width\)\s+solid\s+var\(--focus-color\)/);
+  assert.doesNotMatch(focus.body, /box-shadow/, "그림자는 다른 규칙에 덮이므로 포커스에 쓰지 않는다");
+  assert.equal(rules.at(-1), focus, "포커스 규칙은 파일 맨 끝");
+
+  // outline을 지우는 규칙은 프로그램이 포커스를 옮기는 화면 제목 하나뿐이다.
+  const outlineOff = rules.filter((r) => /outline:\s*(none|0)\b/.test(r.body)).map((r) => r.selector);
+  assert.deepEqual(outlineOff, [".view-title:focus"]);
+  assert.match(css, /--focus-width:\s*3px/);
+  assert.match(css, /--focus-color:\s*var\(--color-school-blue\)/);
 });

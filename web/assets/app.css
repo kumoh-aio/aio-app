@@ -23,7 +23,9 @@
   --touch: 44px;
   --gap: 16px;
   --tab-height: 60px;
-  --focus-ring: 0 0 0 3px var(--color-surface), 0 0 0 5px var(--color-school-blue);
+  --focus-color: var(--color-school-blue);
+  --focus-width: 3px;
+  --focus-offset: 2px;
   --transition: 150ms ease;
 
   --font-body: Pretendard, "Apple SD Gothic Neo", "Malgun Gothic", "맑은 고딕", "Noto Sans KR", system-ui, sans-serif;
@@ -66,11 +68,6 @@ textarea {
 
 a {
   color: var(--color-school-blue);
-}
-
-:focus-visible {
-  outline: none;
-  box-shadow: var(--focus-ring);
 }
 
 /* 머리말 */
@@ -376,3 +373,10 @@ a {
 }
 
 /* 뉴모피즘판(음각·양각) 자리. 설정 화면 이슈에서 html[data-theme="neumorphic"]에 값을 채운다. */
+
+/* 키보드 포커스. box-shadow는 카드·타일 그림자에 덮이므로 outline을 쓰고 파일 맨 끝에 둔다.
+   이 규칙 뒤에 outline이나 포커스 규칙을 더하지 않는다. */
+:focus-visible {
+  outline: var(--focus-width) solid var(--focus-color);
+  outline-offset: var(--focus-offset);
+}
