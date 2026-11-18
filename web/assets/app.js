@@ -43,6 +43,15 @@ const chat = mountChat({
   send: (request) => chatClient.send(request),
   history: createChatHistory({ storage }),
   handwriting,
+  quickActions: [
+    { id: "calendar", label: { ko: "학사일정", en: "Calendar", zh: "校历" },
+      run: () => router.navigate("calendar") },
+    { id: "graduation", label: { ko: "졸업 진단", en: "Graduation", zh: "毕业诊断" },
+      run: () => router.navigate("graduation") },
+    { id: "biskit", label: { ko: "BISKIT 추천", en: "BISKIT picks", zh: "BISKIT 推荐" },
+      run: () => router.navigate("graduation", { section: "recommendations" }) },
+    { id: "handwriting", label: { ko: "손글씨 입력", en: "Handwriting", zh: "手写输入" } },
+  ],
 });
 
 const diagnosis = mountGraduationDiagnosis({
@@ -72,7 +81,10 @@ let home = null;
 let firstRender = true;
 
 function showView({ route, state }) {
-  if (route !== "aio") handwriting.close();
+  if (route !== "aio") {
+    handwriting.close();
+    chat.closeQuickActions();
+  }
   for (const view of document.querySelectorAll("[data-view]")) {
     view.hidden = view.getAttribute("data-view") !== route;
   }
@@ -87,7 +99,15 @@ function showView({ route, state }) {
   else if (route === "aio") chat.refresh();
   // 아이오에서 바꾼 모드를 홈 표시에도 반영한다.
   if (route === "home") syncHomeMode({ home, root: homeRoot, storage: prefs });
-  if (route === "graduation") demoLogin.refresh();
+  if (route === "graduation") {
+    demoLogin.refresh();
+    if (state?.section === "recommendations") {
+      const title = document.querySelector('[data-grad-section="recommendations"] h2')
+        ?? document.getElementById("title-graduation");
+      title?.setAttribute("tabindex", "-1");
+      title?.focus();
+    }
+  }
   if (route === "calendar") calendar.refresh();
 }
 

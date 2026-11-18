@@ -20,6 +20,10 @@ import { FAQ, MODE_STORAGE_KEY, mountHome } from "../web/assets/home.mjs";
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 
 // ---- 가짜 DOM: chat-view.mjs가 쓰는 만큼만 흉내 낸다. innerHTML은 쓰면 실패한다. ----
+class FakeStyle {
+  setProperty() {}
+}
+
 class FakeElement {
   constructor(doc, tag) {
     this.ownerDocument = doc;
@@ -33,6 +37,7 @@ class FakeElement {
     this.open = false;
     this.value = "";
     this._text = "";
+    this.style = new FakeStyle();
   }
   get textContent() {
     return this._text + this.children.map((child) => child.textContent).join("");
@@ -59,6 +64,7 @@ class FakeElement {
   append(...nodes) {
     for (const node of nodes) {
       assert.ok(node instanceof FakeElement, "요소만 붙인다");
+      node.parentElement = this;
       this.children.push(node);
     }
   }
@@ -99,6 +105,12 @@ class FakeElement {
   click() {
     this.dispatch("click");
   }
+  getBoundingClientRect() {
+    return { left: 16, top: 550, width: 48, height: 48 };
+  }
+  contains(node) {
+    return [...this.walk()].includes(node);
+  }
   // [이름="값"] 모양 선택자만 지원한다.
   querySelector(selector) {
     const match = /^\[([\w-]+)="([^"]*)"\]$/.exec(selector);
@@ -119,8 +131,17 @@ class FakeElement {
 }
 
 function fakeDocument() {
-  const doc = { activeElement: null };
+  const doc = {
+    activeElement: null,
+    addEventListener() {},
+    defaultView: {
+      innerWidth: 320, innerHeight: 640,
+      addEventListener() {},
+      matchMedia: () => ({ matches: true }),
+    },
+  };
   doc.createElement = (tag) => new FakeElement(doc, tag);
+  doc.createElementNS = (_namespace, tag) => new FakeElement(doc, tag);
   return doc;
 }
 
@@ -208,10 +229,10 @@ function fakeSend(script = () => doneState()) {
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 
-function mount({ storage = fakeStorage(), send = fakeSend().send, history = fakeHistory(), handwriting } = {}) {
+function mount({ storage = fakeStorage(), send = fakeSend().send, history = fakeHistory(), handwriting, quickActions } = {}) {
   const doc = fakeDocument();
   const root = doc.createElement("div");
-  const chat = mountChat({ root, doc, storage, send, history, ...(handwriting ? { handwriting } : {}) });
+  const chat = mountChat({ root, doc, storage, send, history, handwriting, quickActions });
   const q = {
     lang: () => root.find((n) => n.hasAttribute("data-lang")),
     mode: (value) => root.find((n) => n.getAttribute("data-mode") === value),
@@ -1135,6 +1156,83 @@ test("패드가 있어도 textarea에는 덮개·포인터 처리기·touch-acti
   assert.equal(row.listeners.size, 0, "입력 줄에도 처리기를 두지 않는다");
   const source = read("../web/assets/chat-view.mjs");
   assert.doesNotMatch(source, /touch-action|touchAction|pointer(down|move|up)|addEventListener\("touch/);
+});
+
+// ---- 빠른 실행 연결 ----
+
+function quickActionsFixture() {
+  return [
+    { id: "calendar", label: { ko: "학사일정", en: "Calendar", zh: "校历" }, run() {} },
+    { id: "graduation", label: { ko: "졸업 진단", en: "Graduation", zh: "毕业诊断" }, run() {} },
+    { id: "biskit", label: { ko: "BISKIT 추천", en: "BISKIT picks", zh: "BISKIT 推荐" }, run() {} },
+    { id: "handwriting", label: { ko: "손글씨 입력", en: "Handwriting", zh: "手写输入" } },
+  ];
+}
+
+test("빠른 실행은 옵션이 있을 때 메뉴 버튼을 그리고 패드가 없으면 손글씨를 뺀다", () => {
+  const plain = mount();
+  assert.equal(plain.root.find((n) => n.hasAttribute("data-chat-quick-actions")), null);
+  const { root, q, doc, chat } = mount({ quickActions: quickActionsFixture() });
+  const button = root.find((n) => n.hasAttribute("data-chat-quick-actions"));
+  const menu = root.find((n) => n.getAttribute("role") === "menu");
+  const items = root.findAll((n) => n.getAttribute("role") === "menuitem");
+  assert.equal(button.getAttribute("aria-haspopup"), "menu");
+  assert.equal(button.getAttribute("aria-controls"), menu.getAttribute("id"));
+  assert.equal(button.getAttribute("aria-expanded"), "false");
+  assert.deepEqual(items.map((n) => n.getAttribute("data-action")), ["calendar", "graduation", "biskit"]);
+  for (const [lang, name, firstLabel] of [
+    ["ko", "빠른 실행", "학사일정"],
+    ["en", "Quick actions", "Calendar"],
+    ["zh", "快捷操作", "校历"],
+  ]) {
+    q.lang().value = lang;
+    q.lang().dispatch("change");
+    assert.equal(button.getAttribute("aria-label"), name);
+    button.click();
+    assert.equal(button.getAttribute("aria-expanded"), "true");
+    assert.equal(menu.getAttribute("aria-label"), name);
+    assert.ok(items[0].textContent.includes(firstLabel));
+    assert.equal(doc.activeElement, items[0]);
+    chat.closeQuickActions();
+    assert.equal(menu.inert, true);
+    assert.equal(menu.hidden, true);
+    assert.equal(button.getAttribute("aria-expanded"), "false");
+  }
+});
+
+test("손글씨 버블은 + 버튼과 현재 언어를 패드에 넘기고 선택 범위에만 넣는다", () => {
+  const pad = fakePad();
+  const { send, calls } = fakeSend();
+  const { root, q, doc } = mount({ handwriting: pad, quickActions: quickActionsFixture(), send });
+  const button = root.find((n) => n.hasAttribute("data-chat-quick-actions"));
+  const handwritingItem = root.find((n) => n.getAttribute("data-action") === "handwriting");
+  q.lang().value = "en";
+  q.lang().dispatch("change");
+  q.input().value = "가상 전공 질문";
+  q.input().selectionStart = 3;
+  q.input().selectionEnd = 5;
+  button.click();
+  handwritingItem.click();
+  assert.equal(pad.opened.length, 1);
+  assert.equal(pad.opened[0].trigger, button);
+  assert.equal(pad.opened[0].lang, "en");
+  assert.equal(button.getAttribute("aria-expanded"), "false");
+  pad.opened[0].onInsert("교양");
+  assert.equal(q.input().value, "가상 교양 질문");
+  assert.equal(doc.activeElement, q.input());
+  assert.equal(calls.length, 0);
+  assert.deepEqual([...q.input().listeners.keys()], ["input"]);
+});
+
+test("앱 액션은 기존 탭과 BISKIT 추천 제목을 연결한다", () => {
+  const source = read("../web/assets/app.js");
+  assert.match(source, /id: "calendar"[\s\S]*?router\.navigate\("calendar"\)/);
+  assert.match(source, /id: "graduation"[\s\S]*?router\.navigate\("graduation"\)/);
+  assert.match(source, /id: "biskit"[\s\S]*?router\.navigate\("graduation", \{ section: "recommendations" \}\)/);
+  assert.match(source, /\[data-grad-section="recommendations"\] h2/);
+  assert.match(source, /document\.getElementById\("title-graduation"\)/);
+  assert.match(source, /title\?\.setAttribute\("tabindex", "-1"\)/);
+  assert.match(source, /title\?\.focus\(\)/);
 });
 
 // ---- 정적 파일 검사 ----
