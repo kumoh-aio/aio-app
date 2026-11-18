@@ -610,6 +610,207 @@ a {
   min-height: var(--touch);
 }
 
+/* 졸업 요건 진단(기본판). 뉴모피즘판은 그래프 홈을 음각, 요건 카드를 양각으로 덮어쓴다. */
+.grad-result {
+  display: grid;
+  gap: 24px;
+}
+
+.grad-retry {
+  justify-self: start;
+}
+
+.grad-summary {
+  display: grid;
+  gap: 12px;
+  justify-items: center;
+  padding: var(--gap);
+  border-top: 4px solid var(--color-sky);
+}
+
+.grad-summary .section-title {
+  justify-self: start;
+}
+
+.grad-ring {
+  position: relative;
+  width: 168px;
+  height: 168px;
+}
+
+.grad-ring-svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+}
+
+.grad-ring-track,
+.grad-ring-value {
+  fill: none;
+  stroke-width: 12;
+}
+
+.grad-ring-track {
+  stroke: var(--color-border);
+}
+
+.grad-ring-value {
+  stroke: var(--color-school-blue);
+  stroke-linecap: round;
+  transition: stroke-dasharray var(--transition);
+}
+
+.grad-ring-label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  line-height: 1.2;
+}
+
+.grad-ring-earned {
+  color: var(--color-navy);
+  font-size: 34px;
+  font-weight: 800;
+}
+
+.grad-ring-required {
+  color: var(--color-text-muted);
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.grad-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-height: 28px;
+  padding: 2px 12px;
+  background: var(--color-paper);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-pill);
+  color: var(--color-navy);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.grad-summary .grad-badge {
+  justify-self: center;
+}
+
+.grad-badge[data-met="met"] {
+  background: #E6F6FC;
+  border-color: var(--color-sky);
+  color: var(--color-school-blue);
+}
+
+.grad-badge[data-met="unmet"] {
+  background: #FFF8D6;
+  border-color: var(--color-yellow);
+  color: var(--color-navy);
+}
+
+.grad-notice {
+  margin: 0;
+  color: var(--color-text-muted);
+  font-size: 14px;
+}
+
+.grad-section {
+  display: grid;
+  gap: 10px;
+}
+
+.grad-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.grad-item {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+}
+
+.grad-unmet {
+  border-left: 4px solid var(--color-yellow);
+}
+
+.grad-recommend {
+  border-left: 4px solid var(--color-sky);
+}
+
+.grad-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.grad-item-title,
+.grad-item-credits,
+.grad-item-detail,
+.grad-url-text {
+  margin: 0;
+}
+
+.grad-item-title {
+  color: var(--color-navy);
+  font-weight: 700;
+}
+
+.grad-item-credits {
+  color: var(--color-school-blue);
+  font-weight: 700;
+}
+
+.grad-item-detail,
+.grad-url-text {
+  color: var(--color-text-muted);
+  font-size: 14px;
+  white-space: pre-wrap;
+}
+
+.grad-tag {
+  justify-self: start;
+  color: var(--color-school-blue);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.grad-bar {
+  height: 8px;
+  overflow: hidden;
+  background: var(--color-border);
+  border-radius: var(--radius-pill);
+}
+
+.grad-bar-fill {
+  height: 100%;
+  background: var(--color-school-blue);
+  border-radius: inherit;
+}
+
+.grad-link {
+  display: inline-flex;
+  align-items: center;
+  justify-self: start;
+  min-height: var(--touch);
+  font-weight: 700;
+}
+
+.grad-ask {
+  justify-self: stretch;
+}
+
 @media (max-width: 380px) {
   .shortcut-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
