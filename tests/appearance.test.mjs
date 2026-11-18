@@ -450,33 +450,75 @@ test("빠른 실행 링: 장식 레이어는 누르기를 막지 않고 버튼·
   const label = rule(".qa-label");
   assert.match(label, /pointer-events:\s*none/);
   assert.match(label, /white-space:\s*nowrap/);
-  assert.match(label, /--qa-label-center:\s*calc\(var\(--qa-origin-x, 0px\) \+ var\(--qa-x, 0px\)\);/);
   assert.match(label, /max-width:\s*calc\(100vw - 8px\)/);
-  assert.match(label, /--qa-label-middle:\s*calc\(var\(--qa-origin-y, 0px\) \+ var\(--qa-y, 0px\)\);/);
-  assert.match(label, /bottom:\s*calc\(100% \+ 4px\)/, "라벨은 버블 위 4px에 붙는다");
+  assert.match(label, /top:\s*50%;\s*left:\s*50%;/, "라벨 기준점은 버블 중심");
+  assert.doesNotMatch(label, /bottom:/, "모든 라벨을 버블 위에 고정하지 않는다");
+  const decl = (name) => label.match(new RegExp(`--qa-label-${name}:\\s*([^;]+);`))?.[1].replace(/\s+/g, " ").trim();
+  assert.deepEqual(Object.fromEntries(["cx", "cy", "gap", "dx", "above", "side", "flip", "dy"].map((name) => [name, decl(name)])), {
+    cx: "calc(var(--qa-origin-x, 0px) + var(--qa-x, 0px))",
+    cy: "calc(var(--qa-origin-y, 0px) + var(--qa-y, 0px))",
+    gap: "calc(var(--qa-size) / 2 + 4px)",
+    dx: "calc(-50% + clamp(-50%, var(--qa-x, 0px) * 1000, 50%))",
+    above: "calc(-1 * var(--qa-label-gap) - 100%)",
+    side: "calc(var(--qa-label-gap) + clamp(calc(-2 * var(--qa-label-gap) - 100%), var(--qa-y, 0px) * 1000, 0px))",
+    flip: "clamp(0px, calc((4px - var(--qa-label-cy) - var(--qa-label-above)) * 1000), calc(2 * var(--qa-label-gap) + 100%))",
+    dy: "max(var(--qa-label-side), calc(var(--qa-label-above) + var(--qa-label-flip)))",
+  });
   const shift = label.match(/transform:\s*translate\(([\s\S]+)\);/)?.[1].replace(/\s+/g, " ").trim();
   assert.equal(shift,
-    "clamp(calc(4px - var(--qa-label-center)), -50%, calc(100vw - 4px - var(--qa-label-center) - 100%)), "
-      + "max(0px, calc(8px + var(--qa-size) / 2 + 100% - var(--qa-label-middle)))",
-    "라벨은 가운데 정렬하되 화면 양끝과 위쪽 4px 안으로 밀어 넣는다");
-  // 320px 화면에서 + 중심이 (50, 150)일 때 맨 위 버블 중심이 y 30px 근처면, 버블 위 라벨(높이 약 22px)이
-  // 30 - 24 - 4 - 22 = -20px에서 시작해 잘린다. 모자란 만큼만 내려 위쪽 4px에 맞춘다.
-  const top = (middle, height, diameter = size) => {
-    const natural = middle - diameter / 2 - 4 - height;
-    return natural + Math.max(0, 8 + diameter / 2 + height - middle);
+    "clamp(calc(4px - var(--qa-label-cx)), var(--qa-label-dx), calc(100vw - 4px - var(--qa-label-cx) - 100%)), "
+      + "clamp(calc(4px - var(--qa-label-cy)), var(--qa-label-dy), calc(100dvh - 4px - var(--qa-label-cy) - 100%))",
+    "라벨은 방향에 맞는 자리에 두고 화면 네 변 4px 안으로 막는다");
+
+  // 위 선언을 그대로 옮긴 계산이다. CSS clamp(a, b, c)는 max(a, min(b, c))이고 %는 라벨 자신의 너비·높이다.
+  const clamp = (low, value, high) => Math.max(low, Math.min(value, high));
+  const labelBox = ({ cx, cy, qx, qy, w, h, vw, vh }) => {
+    const gap = size / 2 + 4;
+    const dx = -w / 2 + clamp(-w / 2, qx * 1000, w / 2);
+    const above = -gap - h;
+    const side = gap + clamp(-2 * gap - h, qy * 1000, 0);
+    const flip = clamp(0, (4 - cy - above) * 1000, 2 * gap + h);
+    const dy = Math.max(side, above + flip);
+    const left = cx + clamp(4 - cx, dx, vw - 4 - cx - w);
+    const top = cy + clamp(4 - cy, dy, vh - 4 - cy - h);
+    return { left, top, right: left + w, bottom: top + h };
   };
-  for (const middle of [24, 30, 40, 60]) assert.ok(top(middle, 22) >= 4, `중심 y ${middle}px 라벨 위쪽`);
-  assert.equal(top(150, 22), 100, "위쪽 공간이 넉넉하면 버블 위 4px 그대로");
-  // 320px 화면, 왼쪽 + 버튼의 첫 버블(중심 x 34px)에 너비 72px 라벨: 가운데 정렬이면 왼쪽 끝이 -2px라 잘린다.
-  const place = (center, width, viewport) => {
-    const offset = Math.max(4 - center, Math.min(-width / 2, viewport - 4 - center - width));
-    return [center + offset, center + offset + width];
-  };
-  for (const [center, width] of [[34, 72], [34, 140], [286, 72], [286, 140], [160, 72]]) {
-    const [left, right] = place(center, width, 320);
-    assert.ok(left >= 4 && right <= 316, `중심 ${center}px, 너비 ${width}px: ${left}~${right}`);
+  const ringLabels = ({ ox, oy, radius, angles, widths, vw, vh }) => angles.map((angle, index) => {
+    const qx = radius * Math.cos((angle * Math.PI) / 180);
+    const qy = -radius * Math.sin((angle * Math.PI) / 180);
+    return labelBox({ cx: ox + qx, cy: oy + qy, qx, qy, w: widths[index], h: 22, vw, vh });
+  });
+  // 라벨 너비는 13px 굵은 글자 폭과 좌우 여백으로 어림했다(영어가 한국어보다 넓다).
+  const widths = { en: [78, 93, 108, 101], ko: [70, 74, 92, 86] };
+  const scenarios = [
+    // 검토 재현: 320px 낮은 화면, 왼쪽 + 중심 (50, 150), 버블 4개가 90°→0° 호. 예전에는 두 라벨이 모두 y=4px.
+    ["낮은 화면 왼쪽 +", { ox: 50, oy: 150, radius: 120, angles: [90, 60, 30, 0], vw: 320, vh: 568 }],
+    ["넓은 반원", { ox: 160, oy: 400, radius: 96, angles: [180, 120, 60, 0], vw: 320, vh: 640 }],
+    ["낮은 화면 오른쪽 +", { ox: 270, oy: 150, radius: 120, angles: [180, 150, 120, 90], vw: 320, vh: 568 }],
+  ];
+  for (const [name, scenario] of scenarios) {
+    for (const [lang, list] of Object.entries(widths)) {
+      const boxes = ringLabels({ ...scenario, widths: list });
+      // 삼각함수 좌표의 부동소수 오차(1e-13px 수준)는 화면 경계·겹침 판정에서 무시한다.
+      const eps = 1e-6;
+      for (const [index, box] of boxes.entries()) {
+        assert.ok(box.left >= 4 - eps && box.right <= scenario.vw - 4 + eps
+          && box.top >= 4 - eps && box.bottom <= scenario.vh - 4 + eps,
+        `${name} ${lang} 라벨 ${index + 1} 화면 안: ${JSON.stringify(box)}`);
+      }
+      for (let i = 0; i < boxes.length; i += 1) {
+        for (let j = i + 1; j < boxes.length; j += 1) {
+          const [a, b] = [boxes[i], boxes[j]];
+          const apart = a.right <= b.left + eps || b.right <= a.left + eps
+            || a.bottom <= b.top + eps || b.bottom <= a.top + eps;
+          assert.ok(apart, `${name} ${lang} 라벨 ${i + 1}·${j + 1}이 겹친다: ${JSON.stringify([a, b])}`);
+        }
+      }
+    }
   }
-  assert.deepEqual(place(160, 72, 320), [124, 196], "가운데 버블의 라벨은 가운데 정렬 그대로");
+  // 위쪽 공간이 넉넉한 맨 위 버블 라벨은 버블 위 4px 가운데 정렬 그대로다.
+  assert.deepEqual(labelBox({ cx: 160, cy: 300, qx: 0, qy: -100, w: 70, h: 22, vw: 320, vh: 640 }),
+    { left: 125, top: 250, right: 195, bottom: 272 });
   assert.match(css, /html\[data-theme="neumorphic"\] \.qa-label\s*\{\s*box-shadow:\s*var\(--shadow-raised\)/);
 
   // 라벨·아이콘·경계 대비를 라이트·명시 다크·시스템 다크 모두에서 확인한다.
