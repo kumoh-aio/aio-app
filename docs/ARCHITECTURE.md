@@ -49,4 +49,4 @@ aio-app/
 
 ## 개발 흐름
 
-로컬 대시보드(Codex × Claude Code)가 이 저장소의 이슈를 만들고 두 봇(`kumoh-codex-bot`, `kumoh-claude-bot`)이 PR을 올린다. 검사 명령은 `node --test tests/home.test.mjs tests/router.test.mjs tests/api.test.mjs tests/pwa.test.mjs tests/chat-client.test.mjs tests/chat-history.test.mjs tests/chat-view.test.mjs`다. 테스트 파일은 와일드카드 없이 하나씩 적는다.
+로컬 대시보드(Codex × Claude Code)가 이 저장소의 이슈를 만들고 두 봇(`kumoh-codex-bot`, `kumoh-claude-bot`)이 PR을 올린다. 검사 명령은 `node --test tests/home.test.mjs tests/router.test.mjs tests/api.test.mjs tests/pwa.test.mjs tests/chat-client.test.mjs tests/chat-history.test.mjs tests/chat-view.test.mjs tests/demo-login.test.mjs tests/graduation-view.test.mjs tests/calendar-view.test.mjs`다. 테스트 파일은 와일드카드 없이 하나씩 적는다.
