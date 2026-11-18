@@ -247,7 +247,7 @@ Google Stitch로 만든 시안을 기준으로 한다. 내보낸 원본(HTML·�
 세그먼트 (바탕 --color-paper, 표식 --color-surface + 2px 경계)
 
 시작      ( 빠르게 )  깊이 생각          표식은 빠르게 아래. 경계 --color-school-blue
-늘어남    ( 빠르게 ─── 깊이 생각 )        오른쪽 끝이 먼저 출발, 왼쪽 끝은 60ms 뒤
+늘어남    ( 빠르게 ─── 깊이 생각 )        두 끝이 함께 출발, 왼쪽 끝이 60ms 더 길게
 안착        빠르게  ( 깊이 생각 )         경계 --color-text, 스프링 넘침 1.5% 안
 
 아래 탭 (바탕 --color-surface, 3px 위 선 --color-school-blue)
@@ -258,7 +258,7 @@ Google Stitch로 만든 시안을 기준으로 한다. 내보낸 원본(HTML·�
            홈  아이오  졸업  일정  더보기
 ```
 
-- 가는 쪽 모서리는 바로, 반대쪽 모서리는 `--indicator-lag`만큼 늦게 출발한다. 그래서 표시가 두 칸에 걸쳐 늘어났다가 줄어든다.
+- 두 모서리는 같은 순간에 출발한다. 가는 쪽은 `--indicator-duration` 동안, 반대쪽은 `--indicator-lag`만큼 더 길게 움직인다. 그래서 가는 쪽이 앞서 나가 표시가 늘어났다가 줄어든다. 늦은 끝을 `transition-delay`로 세워 두지 않는다. 멈춘 끝은 방향이 어긋났을 때 다른 끝에 추월당한다.
 - 표식을 진한 강조색 채움으로 그리면 전환 중에 흰 글자가 바탕 위에, 보조 글자가 강조색 위에 놓여 읽히지 않는다. 그래서 선택 표시가 켜지면 세그먼트 표식은 면 색 채움과 2px 경계로 그린다. 버튼 글자는 바탕과 표식 두 면 모두에서 4.5:1인 색만 쓴다. 고른 버튼은 빠르게 `--color-school-blue`, 깊이 생각 `--color-text`, 나머지는 `--color-text-muted`다.
 - 움직이는 2px 좌우 경계는 같은 색 글자 뒤를 지나간다. 그래서 `ready` 버튼 글자에는 표식 채움색(`--color-surface`) 1px 테두리를 네 방향 `text-shadow`로 둘러, 획과 경계선 사이를 띄운다. 겹치는 순간에도 글자는 채움색 위와 같은 4.5:1을 지킨다. 바탕(`--color-paper`) 위에서는 테두리가 바탕과 거의 같아 보이지 않는다.
 - 표식이 붙은 세그먼트(`instant`·`ready`)에서는 버튼 자체의 채움·글자색 전환을 끈다. `instant`↔`ready`를 오갈 때 채움(강조색↔투명)과 글자(on-accent↔강조색)가 섞인 중간값은 어느 조합과도 4.5:1이 맞지 않는다. 두 상태는 한 번에 바뀌고, 움직임은 표식 하나가 맡는다.
@@ -283,16 +283,16 @@ Google Stitch로 만든 시안을 기준으로 한다. 내보낸 원본(HTML·�
 | `data-indicator` | 컨테이너 | 없음이면 지금 모양 그대로. `instant`도 지금 모양 그대로이고 보이지 않는 표식만 좌표에 놓는다. `ready`면 기존 강조를 표식으로 옮기고 전환한다 |
 | `data-indicator-dir` | 컨테이너 | `forward`(오른쪽으로) 또는 `back`(왼쪽으로). 직전 목표가 아니라 지금 그려진 표식 위치에서 새 목표로 가는 방향이다 |
 
-- 전환 도중 다시 고르면 표식은 아직 직전 목표에 닿지 않았다. 직전 목표를 기준으로 방향을 정하면 실제 움직임과 반대가 될 수 있다. 그러면 앞 끝이 60ms 동안 멈춘 뒤 끝을 넘어 폭이 0이 된다. 방향은 그려진 위치(예: `getComputedStyle(컨테이너, "::before")`의 `left`·`right`)로 정한다. CSS는 안전망으로 표식에 `min-width: 24px`을 둬서, 교차하는 순간에도 표식이 사라지지 않게 한다. 안착 폭은 버튼 44px, 320px 화면의 탭 64px 이상이라 이 값은 안착 모양에 영향이 없다.
+- 전환 도중 다시 고르면 표식은 아직 직전 목표에 닿지 않았다. 직전 목표를 기준으로 방향을 정하면 실제 움직임과 반대가 될 수 있다. 방향은 그려진 위치(예: `getComputedStyle(컨테이너, "::before")`의 `left`·`right`)로 정한다. CSS도 방향이 어긋난 경우를 견딘다. 지연이 없어 두 끝이 첫 프레임부터 같은 쪽으로 움직이므로, 320px 화면에서 홈 → 더보기 15ms·16ms 뒤 일정을 골라도 탭 선이 최소 폭 24px 밑으로 줄지 않는다(기본 곡선·스프링 모두, `appearance.test`가 프레임마다 계산해 확인). 표식의 `min-width: 24px`은 남은 안전망이다. 안착 폭은 버튼 44px, 320px 화면의 탭 64px 이상이라 이 값은 안착 모양에 영향이 없다.
 
 - 표식은 컨테이너의 `::before` 하나다. `pointer-events: none`, `z-index: -1`이고 세그먼트는 `isolation: isolate`로 표식이 바탕 밑으로 빠지지 않게 한다.
-- `.mode-group`은 `position: relative`다. 아래 탭은 화면 아래 고정을 `<div class="tab-dock">` 래퍼가 맡고, 그 바로 아래 자식 `.tab-bar`가 `position: relative`로 표식의 기준 상자가 된다(`.tab-dock > .tab-bar`). 래퍼가 없는 마크업에서는 `.tab-bar`의 `position: fixed`가 남는다. fixed도 절대 위치 `::before`의 기준 상자(padding 상자)라 좌표 계약은 같다. 래퍼 없이 `.tab-bar`만 relative로 바꾸면 탭 막대가 본문 끝으로 밀려나므로 그렇게 하지 않는다.
+- `.mode-group`은 `position: relative`다. 아래 탭은 고정된 `.tab-bar`(`position: fixed`, `z-index: 3`) 안에서 표식을 그린다. fixed도 relative처럼 절대 위치 `::before`의 기준 상자(padding 상자)이고 쌓임 맥락을 만들므로, 좌표 계약과 `z-index: -1` 표식이 그대로 동작한다. 래퍼 요소는 두지 않는다. `.tab-bar`를 relative로 덮으면 탭 막대가 본문 끝으로 밀려나므로 그렇게 하지 않는다.
 - 세그먼트 표식 색은 `:has(.mode-deep[aria-pressed="true"])`로 고른다. 모드용 속성을 따로 두지 않는다.
 - `instant`에서 표식은 `opacity: 0`으로 좌표에만 놓인다. 첫 선택 때 `ready`가 되면 표식이 이전 자리에서 보이며 출발하고, 버튼 채움·탭 위 선·음각양각 그림자가 표식으로 넘어간다. 전환은 `ready`에서만 건다.
 
 ### 시간과 곡선
 
-- `--indicator-duration: 200ms`, `--indicator-lag: 60ms`. 늦게 출발하는 모서리도 260ms에 끝나 300ms 미만이다.
+- `--indicator-duration: 200ms`, `--indicator-lag: 60ms`. 더 길게 움직이는 모서리도 지연 없이 260ms에 끝나 300ms 미만이다.
 - 기본 곡선은 ease-out `cubic-bezier(0.22, 1, 0.36, 1)`이다(빠른 실행 링과 같다).
 - `@supports (transition-timing-function: linear(0, 1))` 안에서만 스프링으로 바꾼다. 감쇠비 0.8 스프링을 뽑은 점이다.
 

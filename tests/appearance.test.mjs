@@ -645,17 +645,14 @@ test("선택 표시: data-indicator가 없으면 ::before를 만들지 않아 �
   const group = rule(".mode-group");
   assert.match(group, /position:\s*relative/);
   assert.match(group, /isolation:\s*isolate/, "z-index -1 표식이 세그먼트 바탕 밑으로 빠지지 않는다");
-  // 아래 탭: .tab-dock 래퍼가 있으면 고정은 래퍼가, 기준 상자(relative)는 .tab-bar가 맡는다.
-  // 래퍼가 없는 마크업에서는 .tab-bar의 fixed가 남아 화면 아래 고정이 풀리지 않는다.
-  assert.match(rule(".tab-bar"), /position:\s*fixed/, "래퍼 없는 마크업의 기본값");
-  const dock = rule(".tab-dock");
-  assert.match(dock, /position:\s*fixed;\s*right:\s*0;\s*bottom:\s*0;\s*left:\s*0;\s*z-index:\s*3;/);
-  assert.match(rule(".tab-dock > .tab-bar"), /position:\s*relative/);
-  assert.ok(css.indexOf("\n.tab-dock > .tab-bar {") > css.indexOf("\n.tab-bar {"), "기본 fixed 뒤에서 덮어쓴다");
+  // 아래 탭: 고정된 .tab-bar 자신이 표식의 기준 상자다. fixed도 relative처럼 절대 위치 ::before를 padding 상자에
+  // 놓고, z-index: 3이 표식(z-index: -1)의 쌓임 맥락을 만든다. 래퍼를 두지 않고 relative로 덮지도 않는다.
+  assert.match(rule(".tab-bar"), /position:\s*fixed;\s*right:\s*0;\s*bottom:\s*0;\s*left:\s*0;\s*z-index:\s*3;/);
+  assert.doesNotMatch(css, /tab-dock/, "래퍼 규칙을 두지 않는다");
   for (const [, selector, body] of css.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
-    if (!/position:\s*relative/.test(body)) continue;
+    if (!/position:\s*(?:relative|static|absolute|sticky)/.test(body)) continue;
     for (const part of selector.split(",").map((text) => text.trim())) {
-      if (/\.tab-bar$/.test(part)) assert.equal(part, ".tab-dock > .tab-bar", "relative는 래퍼 안에서만 건다");
+      assert.doesNotMatch(part, /\.tab-bar$/, `탭 막대의 fixed를 덮지 않는다: ${part}`);
     }
   }
   // 전환 도중 방향이 어긋나 두 끝이 교차해도 표식이 0폭으로 사라지지 않는다. 안착 폭(버튼 44px, 320px 화면 탭 64px)보다 작다.
@@ -689,25 +686,15 @@ test("선택 표시: data-indicator가 없으면 ::before를 만들지 않아 �
   assert.doesNotMatch(block, /font-weight/);
 });
 
-// 선택 표시 동작 모듈(selection-indicator.mjs)과 마크업은 상대 작업이 만든다. 결합 체크아웃(또는 통합 CI)에서는
-// 탭 막대가 .tab-dock 래퍼의 바로 아래 자식이어야 .tab-bar가 relative 기준 상자가 된다.
-test("통합 선택 표시: 아래 탭은 .tab-dock 안에 있어 .tab-bar가 relative가 된다", (t) => {
-  const integrated = process.env.AIO_REQUIRE_FULL_SHELL === "1"
-    || existsSync(new URL("../web/assets/selection-indicator.mjs", import.meta.url));
-  if (!integrated) {
-    t.skip("선택 표시 동작 모듈이 아직 이 체크아웃에 합쳐지지 않았음");
-    return;
-  }
-  const html = read("index.html");
-  // 마크업(index.html)은 동작 작업 담당이다. 래퍼가 아직 없으면 실패 대신 todo로 남겨 결과에 드러내고,
-  // 래퍼가 들어오면 구조를 엄격히 본다. 래퍼가 없는 동안 .tab-bar의 계산된 position은 fixed다.
-  if (!html.includes("tab-dock")) {
-    t.todo("index.html의 nav.tab-bar를 div.tab-dock으로 감싸야 .tab-bar가 relative 기준 상자가 됨(동작 작업)");
-    return;
-  }
-  assert.match(html, /<div class="tab-dock">\s*<nav class="tab-bar"[^>]*>[\s\S]*?<\/nav>\s*<\/div>/,
-    "nav.tab-bar는 div.tab-dock의 바로 아래 자식이다");
+// 표식은 JS가 data-indicator를 붙이는 그 탭 막대의 ::before다. 마크업에 탭 막대가 하나뿐이고 body 바로 아래에
+// 있어야 fixed 기준 상자와 표식 좌표(getBoundingClientRect 차이)가 같은 상자를 가리킨다.
+test("선택 표시: 아래 탭 표식은 마크업의 고정 탭 막대 하나 안에서 그린다", () => {
+  const html = read("index.html").replace(/\r\n/g, "\n");
   assert.equal((html.match(/class="tab-bar"/g) ?? []).length, 1);
+  assert.match(html, /<\/main>\s*<nav class="tab-bar"[^>]*>[\s\S]*?<\/nav>/, "본문 다음 body 바로 아래의 nav");
+  assert.doesNotMatch(html, /tab-dock/);
+  const tabs = html.match(/<nav class="tab-bar"[^>]*>([\s\S]*?)<\/nav>/)[1];
+  assert.equal((tabs.match(/<a class="tab"/g) ?? []).length, 5, "다섯 탭 말고 표식용 요소를 더하지 않는다");
 });
 
 test("선택 표시: 가는 쪽 모서리가 먼저 출발하고 지연과 시간의 합이 300ms 미만이다", () => {
@@ -724,7 +711,8 @@ test("선택 표시: 가는 쪽 모서리가 먼저 출발하고 지연과 시�
     .split(/,\s*(?![^()]*\))/).map((part) => part.trim().split(/\s+/)).map(([prop, ...rest]) => [prop, rest.join(" ")]));
   const both = (suffix) => `.mode-group[data-indicator="ready"]${suffix}::before,\n.tab-bar[data-indicator="ready"]${suffix}::before`;
   const lead = "var(--indicator-duration) var(--indicator-ease)";
-  const trail = `${lead} var(--indicator-lag)`;
+  // 늦은 끝은 지연(transition-delay) 없이 같은 순간 출발해 lag만큼 더 길게 움직인다.
+  const trail = "calc(var(--indicator-duration) + var(--indicator-lag)) var(--indicator-ease)";
   assert.deepEqual(transitionOf(both("")), { left: lead, right: lead, "border-color": "var(--indicator-duration) ease-out" });
   assert.deepEqual(transitionOf(both('[data-indicator-dir="forward"]')),
     { left: trail, right: lead, "border-color": "var(--indicator-duration) ease-out" }, "오른쪽으로: 오른쪽 끝이 먼저");
@@ -736,6 +724,87 @@ test("선택 표시: 가는 쪽 모서리가 먼저 출발하고 지연과 시�
   }
   // 사용자 지정 속성 대신 left·right를 전환하므로 @property 등록이 필요 없다.
   assert.doesNotMatch(css, /@property/);
+  // 표식 전환 어디에도 지연을 두지 않는다. 멈춘 끝은 방향이 어긋났을 때 다른 끝에 추월당한다.
+  for (const [, body] of css.matchAll(/data-indicator="ready"[^{}]*\{([^{}]*)\}/g)) {
+    assert.doesNotMatch(body, /transition-delay|\)\s+var\(--indicator-ease\)\s+var\(--indicator-lag\)/);
+  }
+});
+
+// cubic-bezier(x1, y1, x2, y2)를 이분법으로 푼다(x가 단조 증가하므로 수렴한다).
+function cubicBezier(x1, y1, x2, y2) {
+  const bez = (a, b, t) => 3 * (1 - t) ** 2 * t * a + 3 * (1 - t) * t ** 2 * b + t ** 3;
+  return (x) => {
+    if (x <= 0) return 0;
+    if (x >= 1) return 1;
+    let [lo, hi] = [0, 1];
+    for (let i = 0; i < 60; i += 1) {
+      const mid = (lo + hi) / 2;
+      if (bez(x1, x2, mid) < x) lo = mid; else hi = mid;
+    }
+    return bez(y1, y2, (lo + hi) / 2);
+  };
+}
+
+// CSS linear(값 위치%, …)를 구간 선형 보간으로 옮긴다. 첫 점은 0%, 마지막 점은 100%다.
+function linearEasing(source) {
+  const raw = source.split(",").map((part) => part.trim().split(/\s+/));
+  const points = raw.map(([value, at], index) => [Number(value),
+    at === undefined ? (index === 0 ? 0 : 1) : Number.parseFloat(at) / 100]);
+  return (x) => {
+    if (x <= 0) return points[0][0];
+    if (x >= 1) return points.at(-1)[0];
+    const i = points.findIndex(([, at], index) => index > 0 && at >= x);
+    const [[v0, a0], [v1, a1]] = [points[i - 1], points[i]];
+    return v0 + (v1 - v0) * ((x - a0) / (a1 - a0));
+  };
+}
+
+test("선택 표시: 전환 도중 다시 골라 방향이 어긋나도 탭 선이 최소 폭 밑으로 줄지 않는다", () => {
+  const { css, rule } = indicatorCss();
+  const tokens = rule(".mode-group,\n.tab-bar");
+  const duration = toMs(tokens.match(/--indicator-duration:\s*([^;]+);/)[1]);
+  const lag = toMs(tokens.match(/--indicator-lag:\s*([^;]+);/)[1]);
+  const minWidth = Number(rule(".mode-group[data-indicator]::before,\n.tab-bar[data-indicator]::before")
+    .match(/min-width:\s*(\d+)px/)[1]);
+  const eases = {
+    "cubic-bezier": cubicBezier(...tokens.match(/cubic-bezier\(([^)]+)\)/)[1].split(",").map(Number)),
+    "linear() 스프링": linearEasing(css.match(/--indicator-ease:\s*linear\(([^)]+)\)/)[1]),
+  };
+  // CSS 규칙을 그대로 옮긴다: forward는 left가, back은 right가 lag만큼 길게 움직이고 둘 다 지연은 없다.
+  const timing = (dir) => ({ left: duration + (dir === "forward" ? lag : 0), right: duration + (dir === "back" ? lag : 0) });
+  // 320px 화면의 다섯 탭(각 64px). 표식 좌표는 탭 막대 안쪽 경계에서의 left·right다.
+  const container = 320;
+  const tab = (index) => ({ left: 64 * index, right: container - 64 * (index + 1) });
+  const run = (ease, steps) => {
+    let edges = null;
+    const widths = [];
+    let now = 0;
+    for (const { at, from, to, dir } of steps) {
+      for (; edges && now < at; now += 1) widths.push(container - edges.left(now) - edges.right(now));
+      const start = edges ? { left: edges.left(at), right: edges.right(at) } : from;
+      const { left, right } = timing(dir);
+      const move = (a, b, ms) => (t) => a + (b - a) * ease(Math.min(1, Math.max(0, (t - at) / ms)));
+      edges = { left: move(start.left, to.left, left), right: move(start.right, to.right, right) };
+    }
+    for (const end = now + duration + lag + 40; now <= end; now += 1) widths.push(container - edges.left(now) - edges.right(now));
+    return widths;
+  };
+  for (const [name, ease] of Object.entries(eases)) {
+    // 예전 재현: 홈 → 더보기 전환 15ms 뒤 일정. 최신 재현: 같은 흐름에서 한 프레임(16ms) 뒤 일정.
+    // 표식은 일정 왼쪽에 있으므로 맞는 방향은 forward이고, 직전 목표(더보기) 기준으로 잘못 정하면 back이다.
+    for (const at of [15, 16]) {
+      for (const dir of ["forward", "back"]) {
+        const widths = run(ease, [{ at: 0, from: tab(0), to: tab(4), dir: "forward" }, { at, to: tab(3), dir }]);
+        const narrowest = Math.min(...widths);
+        assert.ok(narrowest >= minWidth, `${name} ${at}ms 뒤 ${dir}: 가장 좁은 폭 ${narrowest.toFixed(1)}px`);
+        assert.ok(Math.abs(widths.at(-1) - 64) < 0.01, `${name} ${at}ms 뒤 ${dir}: 마지막 값(일정 탭 64px)에 안착`);
+      }
+    }
+    // 맞는 방향의 한 칸 이동은 늘어났다가 안착 폭으로 돌아온다.
+    const stretch = run(ease, [{ at: 0, from: tab(0), to: tab(1), dir: "forward" }]);
+    assert.ok(Math.max(...stretch) > 64 + 2, `${name} 한 칸 이동 최대 폭 ${Math.max(...stretch).toFixed(1)}px`);
+    assert.ok(Math.abs(stretch.at(-1) - 64) < 0.01);
+  }
 });
 
 test("선택 표시: linear() 스프링은 @supports 안에서만 쓰고 넘침이 작다", () => {
