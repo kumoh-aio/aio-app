@@ -112,3 +112,36 @@ test("timeout aborts the request", async () => {
     }),
   }), { name: "AbortError" });
 });
+
+test("JSON body is serialized with content type and preserves HTTP status", async () => {
+  await assert.rejects(requestJson("https://example.invalid", {
+    method: "POST", body: { fictional: true },
+    fetchImpl: async (_url, options) => {
+      assert.equal(options.body, '{"fictional":true}');
+      assert.equal(options.headers["Content-Type"], "application/json");
+      assert.equal(options.credentials, "omit");
+      assert.equal(options.cache, "no-store");
+      return new Response(null, { status: 401 });
+    },
+  }), { status: 401 });
+});
+
+test("demo API encodes student ID and blocks arbitrary login input", async () => {
+  const calls = [];
+  const api = createApi({ fetchImpl: async (url, options) => {
+    calls.push({ url, options });
+    return Response.json({});
+  } });
+  await api.demoStudents();
+  await api.demoLogin("demo-d02");
+  await api.graduationDemo("fictional & id");
+  assert.match(calls[0].url, /\/demo-students$/);
+  assert.deepEqual(JSON.parse(calls[1].options.body), {
+    student_number: "20990002", password: "demo-d02-pass",
+  });
+  assert.match(calls[2].url, /\/graduation-demo\?student_id=fictional%20%26%20id$/);
+  for (const id of ["fictional-id", "__proto__", " demo-d02", null, {}]) {
+    await assert.rejects(api.demoLogin(id), { status: 401 });
+  }
+  assert.equal(calls.length, 3);
+});

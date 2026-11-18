@@ -6,6 +6,8 @@ import { mountHome } from "./home.mjs";
 import { createChatClient } from "./chat-client.mjs";
 import { createChatHistory } from "./chat-history.mjs";
 import { mountChat, createPrefStorage, syncHomeMode } from "./chat-view.mjs";
+import { mountDemoLogin } from "./demo-login.mjs";
+import { mountGraduationDiagnosis } from "./graduation-view.mjs";
 
 const fetchImpl = globalThis.fetch.bind(globalThis);
 const api = createApi({ base: API_BASE, fetchImpl });
@@ -34,6 +36,20 @@ const chat = mountChat({
   history: createChatHistory({ storage }),
 });
 
+const diagnosis = mountGraduationDiagnosis({
+  root: document.getElementById("graduation-root"),
+  doc: document,
+  loadDiagnosis: (studentId) => api.graduationDemo(studentId),
+  onAsk: () => router.navigate("aio", { question: "졸업 요건과 확인 방법을 알려 주세요." }),
+});
+const demoLogin = mountDemoLogin({
+  root: document.getElementById("graduation-login-root"),
+  doc: document,
+  loadStudents: () => api.demoStudents(),
+  login: (studentId) => api.demoLogin(studentId),
+  diagnosis,
+});
+
 let home = null;
 let firstRender = true;
 
@@ -52,6 +68,7 @@ function showView({ route, state }) {
   else if (route === "aio") chat.refresh();
   // 아이오에서 바꾼 모드를 홈 표시에도 반영한다.
   if (route === "home") syncHomeMode({ home, root: homeRoot, storage: prefs });
+  if (route === "graduation") demoLogin.refresh();
 }
 
 const router = createRouter({ win: window, onRoute: showView });

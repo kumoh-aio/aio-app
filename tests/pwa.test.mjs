@@ -12,6 +12,7 @@ const generatedIcons = new Map([
 const files = ["./", "index.html", "manifest.webmanifest", "assets/app.css", "assets/app.js",
   "assets/home.mjs", "assets/router.mjs", "assets/config.mjs", "assets/api.mjs",
   "assets/chat-view.mjs", "assets/chat-client.mjs", "assets/chat-history.mjs",
+  "assets/demo-login.mjs", "assets/graduation-view.mjs",
   ...generatedIcons.keys()];
 const requireFullShell = process.env.AIO_REQUIRE_FULL_SHELL === "1";
 const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/home.mjs", "assets/router.mjs",
@@ -19,6 +20,8 @@ const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/ho
 const requireScreen = requireFullShell || screenFiles.some((file) => existsSync(new URL(file, webRoot)));
 // 작업 A(다른 브랜치)가 만드는 모듈. 이 체크아웃에 없을 때만 건너뛴다(AIO_REQUIRE_FULL_SHELL=1이면 필수).
 const taskAFiles = ["assets/chat-client.mjs", "assets/chat-history.mjs"];
+// 작업 B의 진단 화면은 통합 브랜치에서 함께 검사한다.
+const taskBFiles = ["assets/graduation-view.mjs"];
 
 function crc32(bytes) {
   let crc = 0xffffffff;
@@ -56,7 +59,7 @@ function worker(scope = "https://example.invalid/app/") {
     self: { registration: { scope }, addEventListener: (name, handler) => { events[name] = handler; },
       clients: { claim: async () => { calls.claimed += 1; } } },
     caches: { open: async (name) => { calls.opened.push(name); return cache; },
-      keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "unrelated"],
+      keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
     fetch: async (request) => { calls.fetched.push(request); return "network"; },
   });
@@ -112,19 +115,20 @@ test("precache files exist or are generated icons", async () => {
     if (!requireScreen && screenFiles.includes(path)) continue;
     const target = new URL(path, webRoot);
     if (!requireFullShell && taskAFiles.includes(path) && !existsSync(target)) continue;
+    if (!requireFullShell && taskBFiles.includes(path) && !existsSync(target)) continue;
     assertFile(target);
   }
 });
 
-test("activate removes only older app caches and keeps CACHE_NAME v2", async () => {
+test("activate removes only older app caches and keeps CACHE_NAME v3", async () => {
   const { events, calls } = worker();
   let pending;
   events.install({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.opened, ["aio-shell-v2"]); // CACHE_NAME is aio-shell-v2.
+  assert.deepEqual(calls.opened, ["aio-shell-v3"]);
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.deleted, ["aio-shell-v0", "aio-shell-v1"]);
+  assert.deepEqual(calls.deleted, ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2"]);
   assert.equal(calls.claimed, 1);
 });
 
@@ -134,6 +138,12 @@ test("API, foreign origin, POST and unlisted URLs never touch caches or respondW
     ["https://example.invalid/api/v1/health", "GET"],
     ["https://example.invalid/app/api/v1/health", "GET"],
     ["https://kumoh-campus.onrender.com/api/v1/health", "GET"],
+    ["https://example.invalid/app/api/v1/demo-students", "GET"],
+    ["https://example.invalid/app/api/v1/demo-login", "POST"],
+    ["https://example.invalid/app/api/v1/graduation-demo?student_id=demo-d02", "GET"],
+    ["https://kumoh-campus.onrender.com/api/v1/demo-students", "GET"],
+    ["https://kumoh-campus.onrender.com/api/v1/demo-login", "POST"],
+    ["https://kumoh-campus.onrender.com/api/v1/graduation-demo?student_id=demo-d02", "GET"],
     ["https://elsewhere.invalid/app/index.html", "GET"],
     ["https://example.invalid/app/index.html", "POST"],
     ["https://example.invalid/app/unknown.html", "GET"],
@@ -156,4 +166,60 @@ test("listed GET uses shell cache and falls back to network on miss", async () =
   events.fetch(event);
   assert.equal(await pending, "network");
   assert.equal(calls.fetched.length, 1);
+});
+
+test("graduation tab connects demo login and diagnosis with a general chat question", async () => {
+  const calls = { refresh: 0, moves: [], students: 0, login: [], diagnosis: [] };
+  const roots = new Map();
+  const doc = {
+    getElementById(id) {
+      if (!roots.has(id)) roots.set(id, { id, focus() {} });
+      return roots.get(id);
+    },
+    querySelectorAll: () => [],
+  };
+  let diagnosisOptions;
+  let loginOptions;
+  const diagnosis = { show() {}, clear() {} };
+  vm.runInNewContext(read("web/assets/app.js").toString().replace(/^import .*;\r?\n/gm, ""), {
+    API_BASE: "https://example.invalid",
+    fetch: async () => assert.fail("unexpected network request"),
+    document: doc,
+    window: {},
+    navigator: {},
+    createApi: () => ({
+      demoStudents: async () => { calls.students += 1; return { students: [] }; },
+      demoLogin: async (id) => { calls.login.push(id); },
+      graduationDemo: async (id) => { calls.diagnosis.push(id); },
+    }),
+    createChatClient: () => ({}),
+    createChatHistory: () => ({}),
+    createPrefStorage: () => ({}),
+    mountChat: () => ({}),
+    mountHome: () => ({}),
+    syncHomeMode() {},
+    mountGraduationDiagnosis(options) { diagnosisOptions = options; return diagnosis; },
+    mountDemoLogin(options) {
+      loginOptions = options;
+      return { refresh() { calls.refresh += 1; } };
+    },
+    createRouter: ({ onRoute }) => ({
+      start: () => onRoute({ route: "graduation" }),
+      navigate: (route, state) => calls.moves.push({ route, state }),
+    }),
+  });
+  assert.equal(loginOptions.root, roots.get("graduation-login-root"));
+  assert.equal(diagnosisOptions.root, roots.get("graduation-root"));
+  assert.equal(loginOptions.diagnosis, diagnosis);
+  assert.equal(calls.refresh, 1);
+  await loginOptions.loadStudents();
+  await loginOptions.login("demo-d03");
+  await diagnosisOptions.loadDiagnosis("demo-d03");
+  assert.equal(calls.students, 1);
+  assert.deepEqual(calls.login, ["demo-d03"]);
+  assert.deepEqual(calls.diagnosis, ["demo-d03"]);
+  diagnosisOptions.onAsk({ studentId: "demo-d03", question: "가상 계정 정보" });
+  assert.equal(calls.moves[0].route, "aio");
+  assert.equal(calls.moves[0].state.question, "졸업 요건과 확인 방법을 알려 주세요.");
+  assert.deepEqual(Object.keys(calls.moves[0].state), ["question"]);
 });
