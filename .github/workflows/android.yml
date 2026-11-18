@@ -46,6 +46,7 @@ jobs:
         run: |
           mkdir -p android/app/src/main/assets/licenses
           cp node_modules/@capacitor/core/LICENSE android/app/src/main/assets/licenses/Capacitor-MIT.txt
+          cp node_modules/@capacitor/app/LICENSE android/app/src/main/assets/licenses/Capacitor-App-MIT.txt
       - name: Set version code from run number
         env:
           VERSION_CODE: ${{ github.run_number }}

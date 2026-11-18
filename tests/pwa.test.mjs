@@ -14,6 +14,7 @@ const files = ["./", "index.html", "manifest.webmanifest", "assets/app.css", "as
   "assets/chat-view.mjs", "assets/chat-client.mjs", "assets/chat-history.mjs",
   "assets/demo-login.mjs", "assets/graduation-view.mjs", "assets/calendar-view.mjs",
   "assets/appearance.mjs",
+  "assets/handwriting-pad.mjs", "assets/handwriting-geometry.mjs",
   ...generatedIcons.keys()];
 const requireFullShell = process.env.AIO_REQUIRE_FULL_SHELL === "1";
 const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/home.mjs", "assets/router.mjs",
@@ -122,17 +123,17 @@ test("precache files exist or are generated icons", async () => {
   }
 });
 
-test("activate removes v6 and older app caches and keeps CACHE_NAME v7", async () => {
+test("activate removes v7 and older app caches and keeps CACHE_NAME v8", async () => {
   const { events, calls } = worker();
   let pending;
   events.install({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.opened, ["aio-shell-v7"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v8"]);
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
   assert.deepEqual(calls.deleted,
     ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4", "aio-shell-v5",
-      "aio-shell-v6"]);
+      "aio-shell-v6", "aio-shell-v7"]);
   assert.equal(calls.claimed, 1);
 });
 
@@ -169,6 +170,8 @@ test("API, foreign origin, POST and unlisted URLs never touch caches or respondW
     ["https://kumoh-campus.onrender.com/api/v1/health", "GET"],
     ["https://example.invalid/app/api/v1/demo-students", "GET"],
     ["https://example.invalid/app/api/v1/demo-login", "POST"],
+    ["https://example.invalid/app/api/v1/handwriting", "POST"],
+    ["https://kumoh-campus.onrender.com/api/v1/handwriting", "POST"],
     ["https://example.invalid/app/api/v1/graduation-demo?student_id=demo-d02", "GET"],
     ["https://kumoh-campus.onrender.com/api/v1/demo-students", "GET"],
     ["https://kumoh-campus.onrender.com/api/v1/demo-login", "POST"],
@@ -186,6 +189,15 @@ test("API, foreign origin, POST and unlisted URLs never touch caches or respondW
   assert.deepEqual(calls.fetched, []);
 });
 
+test("Android packages the pinned App plugin with its license and preserves default back handling", () => {
+  const packages = JSON.parse(read("package.json"));
+  const config = JSON.parse(read("capacitor.config.json"));
+  const workflow = read(".github/workflows/android.yml").toString();
+  assert.equal(packages.dependencies["@capacitor/app"], "8.1.2");
+  assert.equal(config.plugins.App.disableBackButtonHandler, true);
+  assert.match(workflow, /cp node_modules\/@capacitor\/app\/LICENSE android\/app\/src\/main\/assets\/licenses\/Capacitor-App-MIT\.txt/);
+});
+
 test("listed GET uses shell cache and falls back to network on miss", async () => {
   const { events, calls, cache } = worker();
   const request = { url: "https://example.invalid/app/index.html", method: "GET" };
@@ -201,7 +213,7 @@ test("listed GET uses shell cache and falls back to network on miss", async () =
 
 // app.js의 import 줄을 걷어 내고 모듈 함수를 스텁으로 넣어 부팅한다. 네트워크와 저장소는 쓰지 않는다.
 function bootApp(startRoute, storage = null) {
-  const calls = { refresh: 0, calendarRefresh: 0, moves: [], students: 0, login: [], diagnosis: [] };
+  const calls = { refresh: 0, calendarRefresh: 0, moves: [], students: 0, login: [], diagnosis: [], handwritingClose: 0 };
   const roots = new Map();
   const doc = {
     getElementById(id) {
@@ -227,7 +239,11 @@ function bootApp(startRoute, storage = null) {
     createChatClient: () => ({}),
     createChatHistory: () => ({}),
     createPrefStorage: () => ({}),
-    mountChat: () => ({}),
+    createHandwritingPad(opts) {
+      options.handwriting = opts;
+      return { open() {}, close() { calls.handwritingClose += 1; } };
+    },
+    mountChat: () => ({ refresh() {} }),
     mountHome: () => ({}),
     mountAppearance(opts) {
       assert.equal(options.appearance, undefined, "mountAppearance runs only at boot");
@@ -270,6 +286,15 @@ test("app restores appearance before the initial route even when storage access 
 
   const unavailable = bootApp("more");
   assert.equal(unavailable.options.appearance.storage, null);
+});
+
+test("leaving the AIO tab closes the handwriting pad", () => {
+  const { calls, options, doc } = bootApp("aio");
+  assert.equal(options.handwriting.doc, doc);
+  assert.equal(typeof options.handwriting.recognize, "function");
+  assert.equal(calls.handwritingClose, 0);
+  options.onRoute({ route: "home" });
+  assert.equal(calls.handwritingClose, 1);
 });
 
 test("calendar tab mounts the calendar module once and refreshes on each entry", () => {
