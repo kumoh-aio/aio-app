@@ -1,0 +1,137 @@
+name: Android APK
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+    tags: ['v*']
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - name: Install pinned Capacitor packages
+        run: npm install --no-audit --no-fund
+      - name: Generate web icons
+        run: node tools/make-icons.mjs
+      - name: Create Android project
+        run: npx --no-install cap add android
+      - name: Replace launcher icons
+        run: |
+          resources=android/app/src/main/res
+          for density in mdpi hdpi xhdpi xxhdpi xxxhdpi; do
+            for icon in ic_launcher ic_launcher_round; do
+              cp web/assets/icons/icon-512.png "$resources/mipmap-$density/$icon.png"
+            done
+          done
+          rm -rf "$resources/mipmap-anydpi-v26"
+      - name: Sync web assets
+        run: npx --no-install cap sync android
+      - name: Include Capacitor license in APK
+        run: |
+          mkdir -p android/app/src/main/assets/licenses
+          cp node_modules/@capacitor/core/LICENSE android/app/src/main/assets/licenses/Capacitor-MIT.txt
+      - name: Set version code from run number
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { readFileSync, writeFileSync } from 'node:fs';
+          const file = 'android/app/build.gradle';
+          const source = readFileSync(file, 'utf8');
+          if (!/versionCode\s+\d+/.test(source)) throw new Error('Missing versionCode');
+          writeFileSync(file, source.replace(/versionCode\s+\d+/, `versionCode ${process.env.VERSION_CODE}`));
+          NODE
+      - name: Build debug APK
+        if: startsWith(github.ref, 'refs/tags/v') == false
+        run: bash android/gradlew --project-dir android assembleDebug --no-daemon
+      - name: Upload debug APK
+        if: startsWith(github.ref, 'refs/tags/v') == false
+        uses: actions/upload-artifact@v4
+        with:
+          name: aio-debug-${{ github.run_number }}
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+      - name: Build unsigned release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: bash android/gradlew --project-dir android assembleRelease --no-daemon
+      - name: Align, sign and verify release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          : "${ANDROID_KEYSTORE_BASE64:?Missing keystore secret}"
+          : "${ANDROID_KEYSTORE_PASSWORD:?Missing keystore password}"
+          : "${ANDROID_KEY_ALIAS:?Missing key alias}"
+          : "${ANDROID_KEY_PASSWORD:?Missing key password}"
+          keystore="$RUNNER_TEMP/aio-release.keystore"
+          trap 'rm -f "$keystore"' EXIT
+          umask 077
+          printf '%s' "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          build_tools=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -n 1)
+          test -x "$build_tools/zipalign"
+          test -x "$build_tools/apksigner"
+          mkdir -p dist
+          "$build_tools/zipalign" -P 16 -f 4 android/app/build/outputs/apk/release/app-release-unsigned.apk "$RUNNER_TEMP/aio-aligned.apk"
+          "$build_tools/apksigner" sign --ks "$keystore" --ks-key-alias "$ANDROID_KEY_ALIAS" --ks-pass env:ANDROID_KEYSTORE_PASSWORD --key-pass env:ANDROID_KEY_PASSWORD --out dist/aio-release.apk "$RUNNER_TEMP/aio-aligned.apk"
+          "$build_tools/apksigner" verify --verbose --print-certs dist/aio-release.apk
+          "$build_tools/zipalign" -c -P 16 4 dist/aio-release.apk
+          (cd dist && sha256sum aio-release.apk > SHA256SUMS)
+      - name: Upload verified release APK
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: actions/upload-artifact@v4
+        with:
+          name: aio-release-${{ github.run_number }}
+          path: |
+            dist/aio-release.apk
+            dist/SHA256SUMS
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: aio-release-${{ github.run_number }}
+          path: dist
+      - name: Publish verified APK and checksum
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          cd dist
+          sha256sum --check SHA256SUMS
+          printf '아이오 안드로이드 APK\n\nSHA-256\n```text\n%s\n```\n' "$(cat SHA256SUMS)" > "$RUNNER_TEMP/release-notes.md"
+          if gh release view "$RELEASE_TAG" > /dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+          else
+            gh release create "$RELEASE_TAG" --verify-tag --title "$RELEASE_TAG" --notes-file "$RUNNER_TEMP/release-notes.md"
+          fi
+          gh release upload "$RELEASE_TAG" aio-release.apk SHA256SUMS --clobber
+          mkdir downloaded
+          gh release download "$RELEASE_TAG" --pattern aio-release.apk --dir downloaded
+          (cd downloaded && sha256sum --check ../SHA256SUMS)
