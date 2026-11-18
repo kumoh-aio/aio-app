@@ -210,16 +210,40 @@ function fetchShell(events, request) {
   return pending;
 }
 
-test("listed CSS GET revalidates over the network even with old CSS in the shell cache", async () => {
+test("listed CSS GET refreshes the old shell entry for the next offline load", async () => {
   const freshCss = new Response(".tab-bar::before { content: ''; }");
   const staleCss = new Response(".tab-bar { display: grid; }");
-  const { events, calls, cache } = worker(undefined, () => freshCss);
-  cache.match = async () => staleCss;
   const request = { url: "https://example.invalid/app/assets/app.css", method: "GET" };
+  const entries = new Map([[request.url, staleCss]]);
+  let online = true;
+  const { events, calls, cache } = worker(undefined, () => {
+    if (!online) throw new TypeError("offline");
+    return freshCss;
+  });
+  cache.match = async (key) => entries.get(key.url);
+  cache.put = async (key, response) => {
+    assert.notEqual(response, freshCss);
+    entries.set(key.url, response);
+  };
 
   assert.equal(await fetchShell(events, request), freshCss);
+  assert.equal(await freshCss.text(), ".tab-bar::before { content: ''; }");
   assert.deepEqual(calls.fetched, [{ request, cache: "no-cache" }]);
-  assert.deepEqual(calls.opened, []);
+
+  online = false;
+  const offlineCss = await fetchShell(events, request);
+  assert.equal(await offlineCss.text(), ".tab-bar::before { content: ''; }");
+  assert.deepEqual(calls.opened, ["aio-shell-v11", "aio-shell-v11"]);
+});
+
+test("a shell cache write failure still returns the online response", async () => {
+  const fresh = new Response("updated");
+  const { events, calls, cache } = worker(undefined, () => fresh);
+  cache.put = async () => { throw new Error("cache quota exceeded"); };
+  cache.match = async () => assert.fail("a successful fetch needs no fallback");
+  const request = { url: "https://example.invalid/app/index.html", method: "GET" };
+  assert.equal(await fetchShell(events, request), fresh);
+  assert.deepEqual(calls.opened, ["aio-shell-v11"]);
 });
 
 test("listed GET falls back to the shell cache only when fetch rejects", async () => {

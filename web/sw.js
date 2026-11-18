@@ -31,13 +31,23 @@ self.addEventListener("fetch", (event) => {
   if (request.method !== "GET" || url.origin !== new URL(self.registration.scope).origin
       || url.pathname.includes("/api/") || !shellUrls.includes(url.href)) return;
   event.respondWith((async () => {
+    let response;
     try {
-      return await fetch(request, { cache: "no-cache" });
+      response = await fetch(request, { cache: "no-cache" });
     } catch (error) {
       const cache = await caches.open(CACHE_NAME);
       const fallback = await cache.match(request);
       if (fallback) return fallback;
       throw error;
     }
+    if (response.ok) {
+      try {
+        const cache = await caches.open(CACHE_NAME);
+        await cache.put(request, response.clone());
+      } catch {
+        // A cache write failure must not discard a successful network response.
+      }
+    }
+    return response;
   })());
 });
