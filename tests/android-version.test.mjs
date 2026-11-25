@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { RELEASE_TAG, applyVersion, resolveVersion } from "../tools/android-version.mjs";
+import { RELEASE_TAG, applyVersion, checkBadging, resolveVersion } from "../tools/android-version.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -68,76 +68,72 @@ test("applyVersion fails when a declaration is missing, repeated or not a plain 
   }
 });
 
-test("applyVersion ignores commented or quoted declarations and counts same-line duplicates", () => {
+test("only the defaultConfig block lines are read; full-line comments inside are skipped", () => {
   const version = { code: 3, name: "0.0.3-debug" };
-  const blockCommented = gradle
-    .replace("        versionCode 1\n", "        /*\n        versionCode 1\n")
-    .replace('        versionName "1.0"\n', '        versionName "1.0"\n        */\n');
-  const lineCommented = gradle.replace("        versionCode 1", "        // versionCode 1");
-  const sameLine = gradle.replace("minSdkVersion rootProject.ext.minSdkVersion",
-    "minSdkVersion 23; versionCode 9");
-  const quoted = gradle.replace('applicationId "kr.example.aio"', 'applicationId "versionCode 5"')
-    .replace("        versionCode 1\n", "");
-  for (const [label, source] of Object.entries({ blockCommented, lineCommented, sameLine, quoted })) {
-    assert.throws(() => applyVersion(source, version), /Expected exactly one version(Code|Name)/, label);
-  }
-  // 앞에 붙은 인라인 주석은 선언을 바꾸지 않는다.
-  const inlineBlock = applyVersion(gradle.replace("versionCode 1", "/* old */ versionCode 1"), version);
-  assert.match(inlineBlock, /\/\* old \*\/ versionCode 3\n/);
-  // 문자열과 주석 속 단어는 세지 않고, 그 밖의 선언은 그대로 바꾼다.
-  const noisy = gradle
-    .replace('applicationId "kr.example.aio"', 'applicationId "kr.example.aio" // "versionName" 2')
-    .replace("    namespace", "    /* versionCode 7 */\n    namespace")
-    .replace("}\n}\n", "}\n    buildTypes { release { resValue 'string', 'tag', 'versionCode' } }\n}\n😀\n");
-  const out = applyVersion(noisy, version);
+  // 블록 밖의 주석·문자열·다른 블록은 읽지도 바꾸지도 않는다.
+  const outside = `/* versionCode 7 */\n${gradle}`
+    + "def notes = '''\nversionCode 5\nversionName \"9.9\"\n'''\n"
+    + "productFlavors { demo { versionName 'demo' } }\n😀\n";
+  const out = applyVersion(outside.replace("        minSdkVersion", "        // versionName 2\n        minSdkVersion"), version);
   assert.match(out, /^ {8}versionCode 3$/m);
   assert.match(out, /^ {8}versionName "0\.0\.3-debug"$/m);
-  assert.match(out, /\/\* versionCode 7 \*\//);
-  assert.match(out, /'versionCode'/);
-  assert.match(out, /😀\n$/);
+  assert.ok(out.startsWith("/* versionCode 7 */\n"));
+  assert.ok(out.endsWith("def notes = '''\nversionCode 5\nversionName \"9.9\"\n'''\n"
+    + "productFlavors { demo { versionName 'demo' } }\n😀\n"));
+  assert.match(out, /^ {8}\/\/ versionName 2$/m);
 });
 
-test("triple-quoted and interpolated strings never count as declarations", () => {
+test("defaultConfig shapes other than the Capacitor template fail instead of guessing", () => {
   const version = { code: 42, name: "1.2.3" };
-  for (const quote of ["'''", '"""']) {
-    const only = `def sample = ${quote}\nversionCode 1\nversionName "1.0"\n${quote}\n`;
-    assert.throws(() => applyVersion(only, version), /Expected exactly one versionCode/, quote);
-    const notes = `def notes = ${quote}\n        versionCode 5\n        versionName "9.9"\n${quote}\n`;
-    const out = applyVersion(gradle + notes, version);
-    assert.ok(out.endsWith(notes), `${quote} body is untouched`);
-    assert.match(out, /^ {8}versionCode 42$/m);
-    assert.match(out, /^ {8}versionName "1\.2\.3"$/m);
+  const expectLine = /Expected exactly one version(Code|Name) .* line in defaultConfig/;
+  const lineCases = {
+    // 이전 리뷰 재현: 같은 줄 중복, 한 줄 주석으로 지운 선언, 문자열 속 이름, 보간 값
+    "same-line duplicate": gradle.replace("minSdkVersion rootProject.ext.minSdkVersion", "minSdkVersion 23; versionCode 9"),
+    "line-commented": gradle.replace("        versionCode 1", "        // versionCode 1"),
+    "quoted only": gradle.replace('applicationId "kr.example.aio"', 'applicationId "versionCode 5"')
+      .replace("        versionCode 1\n", ""),
+    "trailing comment": gradle.replace("versionCode 1", "versionCode 1 // build"),
+    "assignment": gradle.replace("versionCode 1", "versionCode = 1"),
+    "single quotes": gradle.replace('versionName "1.0"', "versionName '1.0'"),
+    "interpolated name": gradle.replace('versionName "1.0"', 'versionName "v$suffix"'),
+    "expression": gradle.replace("versionCode 1", "versionCode 1 + 1"),
+  };
+  for (const [label, source] of Object.entries(lineCases)) {
+    assert.throws(() => applyVersion(source, version), expectLine, label);
   }
-  const insideInterpolation = `${gradle}def label = "\${tag("versionCode 5", 'versionName')}"\n`;
-  assert.ok(applyVersion(insideInterpolation, version).endsWith(`def label = "\${tag("versionCode 5", 'versionName')}"\n`));
-  const reference = `${gradle}def label = "build \${versionCode}"\n`;
-  assert.throws(() => applyVersion(reference, version), /Expected exactly one versionCode .* found 2/);
-  const interpolatedName = gradle.replace('versionName "1.0"', 'versionName "v$suffix"');
-  assert.throws(() => applyVersion(interpolatedName, version), /Expected exactly one versionName/);
+  const blockCases = {
+    // 이전 리뷰 재현: 블록 주석으로 감싼 선언, 세 겹 따옴표 속 선언
+    "block comment": gradle.replace("        versionCode 1\n", "        /*\n        versionCode 1\n")
+      .replace('        versionName "1.0"\n', '        versionName "1.0"\n        */\n'),
+    "inline block comment": gradle.replace("versionCode 1", "/* old */ versionCode 1"),
+    "triple single": gradle.replace("        minSdkVersion", "        def a = '''\n        versionCode 5\n'''\n        minSdkVersion"),
+    "triple double": gradle.replace("        minSdkVersion", '        def a = """x"""\n        minSdkVersion'),
+  };
+  for (const [label, source] of Object.entries(blockCases)) {
+    assert.throws(() => applyVersion(source, version), /defaultConfig block uses/, label);
+  }
+  const structureCases = {
+    "no defaultConfig": "def sample = '''\nversionCode 1\nversionName \"1.0\"\n'''\n",
+    "one-line block": 'android { defaultConfig { versionCode 1; versionName "1.0" } }',
+    "two blocks": gradle + gradle,
+  };
+  for (const [label, source] of Object.entries(structureCases)) {
+    assert.throws(() => applyVersion(source, version), /Expected exactly one "defaultConfig \{" line/, label);
+  }
+  assert.throws(() => applyVersion(gradle.replace("    }\n}", "}"), version), /no closing brace/);
 });
 
-test("statements separated by semicolons on one line are declarations", () => {
-  const version = { code: 42, name: "1.2.3" };
-  assert.equal(
-    applyVersion('android { defaultConfig { versionCode 1; versionName "1.0" } }', version),
-    'android { defaultConfig { versionCode 42; versionName "1.2.3" } }',
-  );
-  assert.equal(
-    applyVersion("defaultConfig {\n  versionCode = 7 // build\n  versionName = '1.0';\n}\n", version),
-    'defaultConfig {\n  versionCode = 42 // build\n  versionName = "1.2.3";\n}\n',
-  );
-  assert.throws(() => applyVersion('defaultConfig { foo versionCode 1; versionName "1.0" }', version),
-    /Expected exactly one versionCode/);
-  assert.throws(() => applyVersion('defaultConfig { versionCode 1 + 1; versionName "1.0" }', version),
-    /Expected exactly one versionCode/);
-});
-
-test("syntax the tokenizer cannot read fails instead of guessing", () => {
-  const version = { code: 1, name: "1.0.0" };
-  for (const tail of ["def a = '''open\n", 'def a = "open\n', "/* open\n", "def a = $/versionCode 2/$\n",
-    'def a = "${open\n']) {
-    assert.throws(() => applyVersion(gradle + tail, version), /Unsupported or malformed Gradle syntax/, tail);
-  }
+test("checkBadging compares aapt2 package versions with the expected values", () => {
+  const badging = (code, name) => `package: name='kr.example.aio' versionCode='${code}' versionName='${name}' `
+    + "platformBuildVersionName='15' compileSdkVersion='35'\nsdkVersion:'24'\napplication-label:'아이오'\n";
+  assert.deepEqual(checkBadging(badging(42, "1.2.3"), { code: 42, name: "1.2.3" }), { code: 42, name: "1.2.3" });
+  assert.deepEqual(checkBadging(badging(9, "0.0.9-debug").replaceAll("\n", "\r\n"), { code: 9, name: "0.0.9-debug" }),
+    { code: 9, name: "0.0.9-debug" });
+  assert.throws(() => checkBadging(badging(41, "1.2.3"), { code: 42, name: "1.2.3" }), /APK has versionCode 41/);
+  assert.throws(() => checkBadging(badging(42, "1.0"), { code: 42, name: "1.2.3" }), /versionName 1\.0, expected/);
+  assert.throws(() => checkBadging("sdkVersion:'24'\n", { code: 1, name: "1.0.0" }), /one package line, found 0/);
+  assert.throws(() => checkBadging("package: name='x'\n", { code: 1, name: "1.0.0" }), /APK has versionCode undefined/);
+  assert.throws(() => checkBadging(badging(1, "1.0.0") + badging(1, "1.0.0"), { code: 1, name: "1.0.0" }), /found 2/);
 });
 
 test("applyVersion rejects values that would break the Gradle literal", () => {
@@ -174,7 +170,27 @@ test("android.yml sets the version with the tool before both builds and keeps si
   assert.ok(version < find("Build unsigned release APK"));
   assert.ok(find("Build unsigned release APK") < find("Align, sign and verify release APK"));
   assert.doesNotMatch(workflow, /node --input-type=module/);
-  assert.equal((workflow.match(/android-version\.mjs/g) ?? []).length, 1);
+  assert.equal((workflow.match(/android-version\.mjs/g) ?? []).length, 3);
+
+  // 빌드한 APK마다 업로드 전에 aapt2로 두 값을 읽어 도구가 정한 값과 비교한다.
+  for (const [build, check, upload, apk, condition] of [
+    ["Build debug APK", "Check debug APK version", "Upload debug APK",
+      "android/app/build/outputs/apk/debug/app-debug.apk", "startsWith(github.ref, 'refs/tags/v') == false"],
+    ["Align, sign and verify release APK", "Check release APK version", "Upload verified release APK",
+      "dist/aio-release.apk", "startsWith(github.ref, 'refs/tags/v')"],
+  ]) {
+    const at = find(check);
+    assert.equal(at, find(build) + 1, `${check} follows ${build}`);
+    assert.equal(find(upload), at + 1, `${upload} follows ${check}`);
+    const stepText = workflow.slice(list[at].index, list[at + 1].index);
+    assert.ok(stepText.includes(`        if: ${condition}\n`) || stepText.includes(`        if: ${condition}\r\n`), check);
+    assert.match(stepText, /BUILD_REF: \$\{\{ github\.ref \}\}/);
+    assert.match(stepText, /RUN_NUMBER: \$\{\{ github\.run_number \}\}/);
+    assert.match(stepText, /test -x "\$build_tools\/aapt2"/);
+    assert.ok(stepText.includes(`"$build_tools/aapt2" dump badging ${apk} | node tools/android-version.mjs verify - "$BUILD_REF" "$RUN_NUMBER"`), check);
+  }
+  // 파이프 앞의 aapt2 실패도 단계를 실패시키도록 bash 기본값(-eo pipefail)을 쓴다.
+  assert.match(workflow, /defaults:\r?\n {6}run:\r?\n {8}shell: bash/);
   assert.match(workflow, /cp node_modules\/@capacitor\/app\/LICENSE android\/app\/src\/main\/assets\/licenses\/Capacitor-App-MIT\.txt/);
   for (const secret of ["ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD"]) {
     assert.match(workflow, new RegExp(`${secret}: \\$\\{\\{ secrets\\.${secret} \\}\\}`), secret);

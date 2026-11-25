@@ -60,7 +60,7 @@ Render 무료 정적 사이트를 쓴다. Render에 저장소 조직 접근 권�
 | `v<주>.<부>.<수>` 태그 (예: `v1.0.0`) | 태그에서 `v`를 뺀 값 (`1.0.0`) | Actions 실행 번호 |
 | main 푸시·PR | `0.0.<실행 번호>-debug` | Actions 실행 번호 |
 
-태그는 `^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$` 형식이어야 한다. `v1.2`, `v01.2.3`, `v1.2.3-rc.1`처럼 형식이 다르면 `tools/android-version.mjs`가 빌드 전에 실패시킨다.
+태그는 `^v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$` 형식이어야 한다. `v1.2`, `v01.2.3`, `v1.2.3-rc.1`처럼 형식이 다르면 `tools/android-version.mjs`가 빌드 전에 실패시킨다. 이 도구는 Capacitor가 만든 `android/app/build.gradle`의 `defaultConfig` 블록에서 `versionCode <숫자>`와 `versionName "<값>"` 두 줄만 바꾸고, 모양이 다르면 실패한다. 빌드가 끝나면 `aapt2 dump badging`으로 APK에 들어간 두 값을 읽어, 정한 값과 다르면 업로드 전에 실패한다.
 
 1. **서명 키 만들기(처음 한 번)** — JDK의 `keytool`로 만든다. 별칭과 비밀번호는 직접 정한다.
 

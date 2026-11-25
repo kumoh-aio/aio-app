@@ -1,8 +1,10 @@
-// APK의 versionCode·versionName을 빌드 종류에 맞춰 정한다.
+// APK의 versionCode·versionName을 빌드 종류에 맞춰 정하고, 빌드한 APK에 들어갔는지 확인한다.
 // - refs/tags/v<주>.<부>.<수> 태그: versionName은 v를 뗀 값. 다른 v* 태그는 오류.
 // - 그 밖의 빌드: versionName은 0.0.<run_number>-debug.
 // - versionCode는 언제나 run_number.
-// 직접 실행: node tools/android-version.mjs <build.gradle> <github.ref> <run_number>
+// 직접 실행:
+//   node tools/android-version.mjs <build.gradle> <github.ref> <run_number>
+//   aapt2 dump badging <apk> | node tools/android-version.mjs verify - <github.ref> <run_number>
 import { readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
@@ -32,123 +34,86 @@ export function resolveVersion({ ref, runNumber } = {}) {
   return { code, name: `0.0.${code}-debug` };
 }
 
-const IDENT = /[A-Za-z_$][\w$]*/y;
-const NUMBER = /\d[\w.]*/y;
-
-// build.gradle(Groovy)을 선언 판정에 필요한 만큼만 토큰으로 나눈다.
-// - 주석은 버리고, 여러 줄 주석은 줄바꿈 하나로 본다.
-// - '…', "…", '''…''', """…"""는 문자열 토큰 하나다. "${…}" 안은 다시 나눠 이름만 따로 모은다.
-// - 해석할 수 없는 문법($/…/$, 닫히지 않은 문자열·주석)은 추측하지 않고 실패한다.
-export function tokenizeGradle(source, start = 0, untilBrace = false) {
-  const tokens = [];
-  const nested = [];
-  let depth = 0;
-  let i = start;
-  const fail = (what) => { throw new Error(`Unsupported or malformed Gradle syntax at offset ${i}: ${what}`); };
-  const push = (type, from, to, extra = {}) => tokens.push({ type, start: from, end: to, text: source.slice(from, to), ...extra });
-
-  const readString = () => {
-    const quote = source[i];
-    const triple = source.startsWith(quote.repeat(3), i);
-    let j = i + (triple ? 3 : 1);
-    let interpolated = false;
-    for (;;) {
-      if (j >= source.length) fail("unterminated string");
-      const char = source[j];
-      if (char === "\\") { j += 2; continue; }
-      if (triple ? source.startsWith(quote.repeat(3), j) : char === quote) break;
-      if (!triple && (char === "\n" || char === "\r")) fail("line break in a single-line string");
-      if (quote === '"' && char === "$") {
-        interpolated = true;
-        if (source[j + 1] === "{") {
-          const inner = tokenizeGradle(source, j + 2, true);
-          nested.push(...inner.tokens.filter((token) => token.type === "ident"), ...inner.nested);
-          j = inner.end + 1;
-          continue;
-        }
-      }
-      j += 1;
-    }
-    const end = j + (triple ? 3 : 1);
-    push("string", i, end, { triple, interpolated });
-    i = end;
-  };
-
-  while (i < source.length) {
-    const char = source[i];
-    const next = source[i + 1];
-    if (char === " " || char === "\t" || char === "\f") { i += 1; continue; }
-    if (char === "\\" && (next === "\n" || next === "\r")) { i += next === "\r" && source[i + 2] === "\n" ? 3 : 2; continue; }
-    if (char === "\n" || char === "\r") {
-      const end = char === "\r" && next === "\n" ? i + 2 : i + 1;
-      push("newline", i, end);
-      i = end;
-      continue;
-    }
-    if (char === "/" && next === "/") {
-      while (i < source.length && source[i] !== "\n" && source[i] !== "\r") i += 1;
-      continue;
-    }
-    if (char === "/" && next === "*") {
-      const close = source.indexOf("*/", i + 2);
-      if (close < 0) fail("unterminated comment");
-      if (/[\r\n]/.test(source.slice(i, close))) push("newline", i, close + 2);
-      i = close + 2;
-      continue;
-    }
-    if (char === "$" && next === "/") fail("dollar-slashy string");
-    if (char === "'" || char === '"') { readString(); continue; }
-    if (untilBrace && char === "}" && depth === 0) return { tokens, nested, end: i };
-    let match;
-    if ((IDENT.lastIndex = i, match = IDENT.exec(source))) { push("ident", i, i + match[0].length); i += match[0].length; continue; }
-    if ((NUMBER.lastIndex = i, match = NUMBER.exec(source))) { push("number", i, i + match[0].length); i += match[0].length; continue; }
-    if (char === "{") depth += 1;
-    if (char === "}") depth -= 1;
-    push("punct", i, i + 1);
-    i += 1;
-  }
-  if (untilBrace) fail("unterminated ${ } expression");
-  return { tokens, nested, end: i };
-}
-
-const STATEMENT_START = (token) => !token || token.type === "newline" || token.text === "{" || token.text === ";";
-const STATEMENT_END = (token) => !token || token.type === "newline" || token.text === ";" || token.text === "}";
-const LITERAL = {
-  versionCode: (token) => token?.type === "number" && /^\d+$/.test(token.text),
-  versionName: (token) => token?.type === "string" && !token.triple && !token.interpolated,
-};
-
-// 이름이 코드에 딱 한 번 나오고, 그 자리가 `이름 [=] 리터럴` 한 문장일 때만 값 토큰을 돌려준다.
-function findDeclaration({ tokens, nested }, key) {
-  const at = tokens.flatMap((token, index) => (token.type === "ident" && token.text === key ? [index] : []));
-  const count = at.length + nested.filter((token) => token.text === key).length;
-  const reject = () => {
-    throw new Error(`Expected exactly one ${key} declaration with a literal value, found ${count} mention(s)`);
-  };
-  if (count !== 1 || at.length !== 1) reject();
-  let index = at[0];
-  if (!STATEMENT_START(tokens[index - 1])) reject();
-  index += 1;
-  if (tokens[index]?.text === "=") index += 1;
-  if (!LITERAL[key](tokens[index]) || !STATEMENT_END(tokens[index + 1])) reject();
-  return tokens[index];
-}
-
-export function applyVersion(gradleSource, { code, name } = {}) {
-  if (typeof gradleSource !== "string") throw new TypeError("gradleSource must be a string");
+function assertVersion({ code, name } = {}) {
   if (!Number.isInteger(code) || code < 1 || code > MAX_VERSION_CODE) throw new Error(`Invalid versionCode: ${code}`);
   if (typeof name !== "string" || !/^\d+\.\d+\.\d+(-debug)?$/.test(name)) throw new Error(`Invalid versionName: ${name}`);
-  const lexed = tokenizeGradle(gradleSource);
-  const edits = [
-    { ...findDeclaration(lexed, "versionCode"), value: String(code) },
-    { ...findDeclaration(lexed, "versionName"), value: `"${name}"` },
-  ].sort((a, b) => b.start - a.start);
-  let result = gradleSource;
-  for (const { start, end, value } of edits) result = result.slice(0, start) + value + result.slice(end);
-  return result;
 }
 
-function main([file, ref, runNumber]) {
+// Capacitor가 만드는 build.gradle의 모양만 받는다.
+//   <들여쓰기>defaultConfig {
+//   <들여쓰기>    versionCode <숫자>
+//   <들여쓰기>    versionName "<값>"
+//   <들여쓰기>}
+// 다른 모양은 Groovy를 해석하지 않고 실패한다. 블록 밖은 읽지도 바꾸지도 않는다.
+const DEFAULT_CONFIG_OPEN = /^([ \t]*)defaultConfig[ \t]*\{[ \t]*\r?$/;
+const UNSUPPORTED_IN_BLOCK = /\/\*|'''|"""/;
+const LINES = {
+  versionCode: /^([ \t]*versionCode[ \t]+)\d+([ \t]*\r?)$/,
+  versionName: /^([ \t]*versionName[ \t]+)"[^"\\$\r\n]*"([ \t]*\r?)$/,
+};
+const LITERAL_SHAPE = { versionCode: "<number>", versionName: '"<value>"' };
+
+function findDefaultConfig(lines) {
+  const opens = lines.flatMap((line, index) => (DEFAULT_CONFIG_OPEN.test(line) ? [index] : []));
+  if (opens.length !== 1) throw new Error(`Expected exactly one "defaultConfig {" line, found ${opens.length}`);
+  const [open] = opens;
+  const indent = DEFAULT_CONFIG_OPEN.exec(lines[open])[1];
+  const close = new RegExp(`^${indent}\\}[ \\t]*\\r?$`);
+  const end = lines.findIndex((line, index) => index > open && close.test(line));
+  if (end < 0) throw new Error("defaultConfig block has no closing brace at the same indentation");
+  const body = lines.slice(open + 1, end).join("\n");
+  if (UNSUPPORTED_IN_BLOCK.test(body)) throw new Error("defaultConfig block uses /* */ comments or triple-quoted strings");
+  return { start: open + 1, end };
+}
+
+function findLine(lines, { start, end }, key) {
+  const mention = new RegExp(`\\b${key}\\b`);
+  const found = [];
+  for (let index = start; index < end; index += 1) {
+    if (!lines[index].trimStart().startsWith("//") && mention.test(lines[index])) found.push(index);
+  }
+  if (found.length !== 1 || !LINES[key].test(lines[found[0]])) {
+    throw new Error(`Expected exactly one ${key} ${LITERAL_SHAPE[key]} line in defaultConfig, found ${found.length} mention(s)`);
+  }
+  return found[0];
+}
+
+export function applyVersion(gradleSource, version = {}) {
+  if (typeof gradleSource !== "string") throw new TypeError("gradleSource must be a string");
+  assertVersion(version);
+  const lines = gradleSource.split("\n");
+  const block = findDefaultConfig(lines);
+  const codeLine = findLine(lines, block, "versionCode");
+  const nameLine = findLine(lines, block, "versionName");
+  lines[codeLine] = lines[codeLine].replace(LINES.versionCode, (_, head, tail) => `${head}${version.code}${tail}`);
+  lines[nameLine] = lines[nameLine].replace(LINES.versionName, (_, head, tail) => `${head}"${version.name}"${tail}`);
+  return lines.join("\n");
+}
+
+// `aapt2 dump badging` 출력의 package 줄에서 두 값을 읽어 기대값과 비교한다.
+export function checkBadging(output, version = {}) {
+  assertVersion(version);
+  const lines = String(output ?? "").split(/\r?\n/).filter((line) => line.startsWith("package:"));
+  if (lines.length !== 1) throw new Error(`aapt2 output must have one package line, found ${lines.length}`);
+  const read = (key) => new RegExp(`\\s${key}='([^']*)'`).exec(lines[0])?.[1];
+  const actual = { code: read("versionCode"), name: read("versionName") };
+  if (actual.code !== String(version.code) || actual.name !== version.name) {
+    throw new Error(`APK has versionCode ${actual.code} and versionName ${actual.name}, `
+      + `expected ${version.code} and ${version.name}`);
+  }
+  return { code: version.code, name: version.name };
+}
+
+function main(args) {
+  if (args[0] === "verify") {
+    const [, input, ref, runNumber] = args;
+    if (!input) throw new Error("Usage: aapt2 dump badging <apk> | node tools/android-version.mjs verify - <github.ref> <run_number>");
+    const version = resolveVersion({ ref, runNumber });
+    checkBadging(readFileSync(input === "-" ? 0 : input, "utf8"), version);
+    console.log(`APK matches versionCode ${version.code}, versionName ${version.name}`);
+    return;
+  }
+  const [file, ref, runNumber] = args;
   if (!file) throw new Error("Usage: node tools/android-version.mjs <build.gradle> <github.ref> <run_number>");
   const version = resolveVersion({ ref, runNumber });
   writeFileSync(file, applyVersion(readFileSync(file, "utf8"), version));
