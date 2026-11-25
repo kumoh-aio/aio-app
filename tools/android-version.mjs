@@ -32,23 +32,65 @@ export function resolveVersion({ ref, runNumber } = {}) {
   return { code, name: `0.0.${code}-debug` };
 }
 
-const CODE_LINE = /^([ \t]*versionCode[ \t]+)\d+([ \t]*)$/m;
-const NAME_LINE = /^([ \t]*versionName[ \t]+)"[^"\r\n]*"([ \t]*)$/m;
-const countDeclarations = (source, key) => (source.match(new RegExp(`^[ \\t]*${key}\\b`, "gm")) ?? []).length;
+// 주석(//, /* */)과 문자열 안쪽을 공백으로 바꾼 같은 길이의 사본을 만든다.
+// 줄바꿈과 따옴표는 남겨 원본과 위치가 그대로 맞는다.
+export function maskGradle(source) {
+  const out = source.split("");
+  let state = "code";
+  for (let i = 0; i < source.length; i += 1) {
+    const char = source[i];
+    const next = source[i + 1];
+    const blank = (at) => { if (at < out.length && out[at] !== "\n" && out[at] !== "\r") out[at] = " "; };
+    if (state === "code") {
+      if (char === "/" && next === "/") { state = "line"; blank(i); }
+      else if (char === "/" && next === "*") { state = "block"; blank(i); blank(i + 1); i += 1; }
+      else if (char === '"' || char === "'") state = char;
+    } else if (state === "line") {
+      if (char === "\n" || char === "\r") state = "code"; else blank(i);
+    } else if (state === "block") {
+      blank(i);
+      if (char === "*" && next === "/") { blank(i + 1); i += 1; state = "code"; }
+    } else if (char === "\\") {
+      blank(i); blank(i + 1); i += 1;
+    } else if (char === state) {
+      state = "code";
+    } else if (char === "\n" || char === "\r") {
+      state = "code";
+    } else {
+      blank(i);
+    }
+  }
+  return out.join("");
+}
+
+// 가린 사본에서 찾는 선언 줄 모양과, 같은 위치의 원본에서 확인할 모양.
+const DECLARATIONS = {
+  versionCode: { masked: /^[ \t]*versionCode[ \t]+\d+[ \t]*$/m, original: /([ \t]*versionCode[ \t]+)\d+/y },
+  versionName: { masked: /^[ \t]*versionName[ \t]+"[ ]*"[ \t]*$/m, original: /([ \t]*versionName[ \t]+)"[^"\r\n\\]*"/y },
+};
+
+function findDeclaration(source, masked, key) {
+  const count = (masked.match(new RegExp(`\\b${key}\\b`, "g")) ?? []).length;
+  const line = count === 1 ? DECLARATIONS[key].masked.exec(masked) : null;
+  const original = DECLARATIONS[key].original;
+  if (line) original.lastIndex = line.index;
+  const match = line && original.exec(source);
+  if (!match) throw new Error(`Expected exactly one ${key} declaration, found ${count}`);
+  return { start: match.index, end: match.index + match[0].length, head: match[1] };
+}
 
 export function applyVersion(gradleSource, { code, name } = {}) {
   if (typeof gradleSource !== "string") throw new TypeError("gradleSource must be a string");
   if (!Number.isInteger(code) || code < 1 || code > MAX_VERSION_CODE) throw new Error(`Invalid versionCode: ${code}`);
   if (typeof name !== "string" || !/^\d+\.\d+\.\d+(-debug)?$/.test(name)) throw new Error(`Invalid versionName: ${name}`);
-  for (const [key, line] of [["versionCode", CODE_LINE], ["versionName", NAME_LINE]]) {
-    const count = countDeclarations(gradleSource, key);
-    if (count !== 1 || !line.test(gradleSource)) {
-      throw new Error(`Expected exactly one ${key} declaration, found ${count}`);
-    }
-  }
-  return gradleSource
-    .replace(CODE_LINE, (_, head, tail) => `${head}${code}${tail}`)
-    .replace(NAME_LINE, (_, head, tail) => `${head}"${name}"${tail}`);
+  const masked = maskGradle(gradleSource);
+  const edits = [
+    { ...findDeclaration(gradleSource, masked, "versionCode"), value: String(code) },
+    { ...findDeclaration(gradleSource, masked, "versionName"), value: `"${name}"` },
+  ].sort((a, b) => b.start - a.start);
+  let result = gradleSource;
+  for (const { start, end, head, value } of edits) result = result.slice(0, start) + head + value + result.slice(end);
+  return result;
 }
 
 function main([file, ref, runNumber]) {

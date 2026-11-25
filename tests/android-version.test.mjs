@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { RELEASE_TAG, applyVersion, resolveVersion } from "../tools/android-version.mjs";
+import { RELEASE_TAG, applyVersion, maskGradle, resolveVersion } from "../tools/android-version.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -66,6 +66,34 @@ test("applyVersion fails when a declaration is missing, repeated or not a plain 
   for (const [label, source] of Object.entries(cases)) {
     assert.throws(() => applyVersion(source, version), /Expected exactly one version(Code|Name)/, label);
   }
+});
+
+test("applyVersion ignores commented or quoted declarations and counts same-line duplicates", () => {
+  const version = { code: 3, name: "0.0.3-debug" };
+  const blockCommented = gradle
+    .replace("        versionCode 1\n", "        /*\n        versionCode 1\n")
+    .replace('        versionName "1.0"\n', '        versionName "1.0"\n        */\n');
+  const lineCommented = gradle.replace("        versionCode 1", "        // versionCode 1");
+  const sameLine = gradle.replace("minSdkVersion rootProject.ext.minSdkVersion",
+    "minSdkVersion 23; versionCode 9");
+  const inlineBlock = gradle.replace("versionCode 1", "/* old */ versionCode 1");
+  const quoted = gradle.replace('applicationId "kr.example.aio"', 'applicationId "versionCode 5"')
+    .replace("        versionCode 1\n", "");
+  for (const [label, source] of Object.entries({ blockCommented, lineCommented, sameLine, inlineBlock, quoted })) {
+    assert.throws(() => applyVersion(source, version), /Expected exactly one version(Code|Name)/, label);
+  }
+  // 문자열과 주석 속 단어는 세지 않고, 그 밖의 선언은 그대로 바꾼다.
+  const noisy = gradle
+    .replace('applicationId "kr.example.aio"', 'applicationId "kr.example.aio" // "versionName" 2')
+    .replace("    namespace", "    /* versionCode 7 */\n    namespace")
+    .replace("}\n}\n", "}\n    buildTypes { release { resValue 'string', 'tag', 'versionCode' } }\n}\n😀\n");
+  const out = applyVersion(noisy, version);
+  assert.match(out, /^ {8}versionCode 3$/m);
+  assert.match(out, /^ {8}versionName "0\.0\.3-debug"$/m);
+  assert.match(out, /\/\* versionCode 7 \*\//);
+  assert.match(out, /'versionCode'/);
+  assert.match(out, /😀\n$/);
+  assert.equal(maskGradle(noisy).length, noisy.length);
 });
 
 test("applyVersion rejects values that would break the Gradle literal", () => {
