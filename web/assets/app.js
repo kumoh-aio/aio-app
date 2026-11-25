@@ -175,6 +175,11 @@ home = mountHome({
 
 router.start();
 
+// v12 워커가 새 모듈을 캐시하지 못한 상태에서도 앱은 시작한다.
+import("./release-update.mjs").catch(() => null)
+  .then((module) => module?.initReleaseUpdate({ storage }))
+  .catch(() => null);
+
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch(() => {

@@ -17,6 +17,7 @@ import {
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), "utf8");
 const API_ORIGIN = "https://kumoh-campus.onrender.com";
+const CONNECT_ORIGINS = [API_ORIGIN, "https://api.github.com"];
 
 // ---- 가짜 DOM: home.mjs가 쓰는 만큼만 흉내 낸다. innerHTML은 쓰면 실패한다. ----
 class FakeElement {
@@ -437,7 +438,7 @@ test("app.js는 config의 API_BASE와 api의 createApi로 부팅하고 ./sw.js�
   assert.match(source, /serviceWorker\.register\("\.\/sw\.js"\)/);
 });
 
-test("index.html: CSP는 default-src 'self'에 API 주소만 connect-src로 더한다", () => {
+test("index.html: CSP는 connect-src에 앱 API와 GitHub API를 허용한다", () => {
   const html = read("../web/index.html");
   const metas = [...html.matchAll(/<meta\s+http-equiv="Content-Security-Policy"\s+content="([^"]+)"/gi)];
   assert.equal(metas.length, 1);
@@ -445,11 +446,11 @@ test("index.html: CSP는 default-src 'self'에 API 주소만 connect-src로 더�
     metas[0][1].split(";").map((part) => part.trim().split(/\s+/)).filter((p) => p[0]).map(([name, ...values]) => [name, values]),
   );
   assert.deepEqual(directives["default-src"], ["'self'"]);
-  assert.deepEqual(directives["connect-src"], [API_ORIGIN]);
+  assert.deepEqual(directives["connect-src"], CONNECT_ORIGINS);
   for (const [name, values] of Object.entries(directives)) {
     for (const value of values) {
       assert.ok(!/unsafe|\*|^http:|^data:|^blob:/.test(value), `${name} ${value}`);
-      if (/^https:/.test(value)) assert.equal(value, API_ORIGIN);
+      if (/^https:/.test(value)) assert.equal(name, "connect-src");
     }
   }
 });
@@ -470,8 +471,8 @@ test("index.html: 인라인 스크립트·style·외부 자원 없음, manifest�
   for (const [, attr, value] of html.matchAll(/\s(src|href)="([^"]*)"/gi)) {
     assert.ok(!/^(?:[a-z]+:)?\/\//i.test(value), `${attr}=${value} 외부 자원 금지`);
   }
-  // 주소는 CSP의 API 주소 한 곳에만 나온다.
-  assert.deepEqual([...html.matchAll(/https?:\/\/[^\s"';]+/g)].map((m) => m[0]), [API_ORIGIN]);
+  // 외부 주소는 CSP의 connect-src에만 나온다.
+  assert.deepEqual([...html.matchAll(/https?:\/\/[^\s"';]+/g)].map((m) => m[0]), CONNECT_ORIGINS);
 
   assert.match(html, /<link rel="manifest" href="manifest\.webmanifest">/);
   assert.match(html, /<html lang="ko">/);

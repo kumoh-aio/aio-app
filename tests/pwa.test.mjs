@@ -17,6 +17,7 @@ const files = ["./", "index.html", "manifest.webmanifest", "assets/app.css", "as
   "assets/calendar-grid.mjs", "assets/appearance.mjs",
   "assets/handwriting-pad.mjs", "assets/handwriting-geometry.mjs",
   "assets/quick-actions.mjs", "assets/selection-indicator.mjs", "assets/send-icon.mjs",
+  "assets/release-update.mjs",
   ...generatedIcons.keys()];
 const requireFullShell = process.env.AIO_REQUIRE_FULL_SHELL === "1";
 const screenFiles = ["index.html", "assets/app.css", "assets/app.js", "assets/home.mjs", "assets/router.mjs",
@@ -65,7 +66,7 @@ function worker(scope = "https://example.invalid/app/", fetchResponse = () => "n
     caches: { open: async (name) => { calls.opened.push(name); return cache; },
       keys: async () => ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4",
         "aio-shell-v5", "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10",
-        "aio-shell-v11", "aio-shell-v12", "unrelated"],
+        "aio-shell-v11", "aio-shell-v12", "aio-shell-v13", "unrelated"],
       delete: async (name) => calls.deleted.push(name) },
     fetch: async (request, options) => {
       calls.fetched.push({ request, cache: options?.cache });
@@ -129,18 +130,19 @@ test("precache files exist or are generated icons", async () => {
   }
 });
 
-test("activate removes v0 through v11 app caches and preserves v12 and unrelated caches", async () => {
+test("activate removes v0 through v12 app caches and preserves v13 and unrelated caches", async () => {
   const { events, calls } = worker();
   let pending;
   events.install({ waitUntil: (promise) => { pending = promise; } });
   await pending;
-  assert.deepEqual(calls.opened, ["aio-shell-v12"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v13"]);
   assert.ok(calls.added.includes("https://example.invalid/app/assets/send-icon.mjs"), "send icon module is cached");
+  assert.ok(calls.added.includes("https://example.invalid/app/assets/release-update.mjs"), "release update module is cached");
   events.activate({ waitUntil: (promise) => { pending = promise; } });
   await pending;
   assert.deepEqual(calls.deleted,
     ["aio-shell-v0", "aio-shell-v1", "aio-shell-v2", "aio-shell-v3", "aio-shell-v4", "aio-shell-v5",
-      "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10", "aio-shell-v11"]);
+      "aio-shell-v6", "aio-shell-v7", "aio-shell-v8", "aio-shell-v9", "aio-shell-v10", "aio-shell-v11", "aio-shell-v12"]);
   assert.equal(calls.claimed, 1);
 });
 
@@ -234,7 +236,7 @@ test("listed CSS GET refreshes the old shell entry for the next offline load", a
   online = false;
   const offlineCss = await fetchShell(events, request);
   assert.equal(await offlineCss.text(), ".tab-bar::before { content: ''; }");
-  assert.deepEqual(calls.opened, ["aio-shell-v12", "aio-shell-v12"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v13", "aio-shell-v13"]);
 });
 
 test("a shell cache write failure still returns the online response", async () => {
@@ -244,7 +246,7 @@ test("a shell cache write failure still returns the online response", async () =
   cache.match = async () => assert.fail("a successful fetch needs no fallback");
   const request = { url: "https://example.invalid/app/index.html", method: "GET" };
   assert.equal(await fetchShell(events, request), fresh);
-  assert.deepEqual(calls.opened, ["aio-shell-v12"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v13"]);
 });
 
 test("listed GET falls back to the shell cache only when fetch rejects", async () => {
@@ -257,7 +259,7 @@ test("listed GET falls back to the shell cache only when fetch rejects", async (
     return "cached";
   };
   assert.equal(await fetchShell(events, request), "cached");
-  assert.deepEqual(calls.opened, ["aio-shell-v12"]);
+  assert.deepEqual(calls.opened, ["aio-shell-v13"]);
 
   cache.match = async () => undefined;
   await assert.rejects(fetchShell(events, request), (error) => error === offline);
@@ -275,7 +277,8 @@ test("online HTTP errors do not fall back to a stale shell file", async () => {
 // app.js의 import 줄을 걷어 내고 모듈 함수를 스텁으로 넣어 부팅한다. 네트워크와 저장소는 쓰지 않는다.
 // 전송 아이콘 모듈은 부팅을 막지 않는 동적 import다. 가짜 로더(Promise)로 바꿔 끼워 대기·성공·실패를 정한다.
 const SEND_ICON_IMPORT = 'import("./send-icon.mjs")';
-function bootApp(startRoute, storage = null, { tabBar = null, tabs = [], loadSendIcon = null } = {}) {
+const RELEASE_UPDATE_IMPORT = 'import("./release-update.mjs")';
+function bootApp(startRoute, storage = null, { tabBar = null, tabs = [], loadSendIcon = null, loadReleaseUpdate = async () => null } = {}) {
   const calls = { refresh: 0, calendarRefresh: 0, moves: [], students: 0, login: [], diagnosis: [], handwritingClose: 0, quickActionsClose: 0 };
   const roots = new Map();
   const doc = {
@@ -295,7 +298,13 @@ function bootApp(startRoute, storage = null, { tabBar = null, tabs = [], loadSen
   const fetchStub = async () => assert.fail("unexpected network request");
   const source = read("web/assets/app.js").toString();
   assert.equal(source.split(SEND_ICON_IMPORT).length, 2, "send-icon.mjs dynamic import appears once");
-  vm.runInNewContext(source.replace(/^import .*;\r?\n/gm, "").replace(SEND_ICON_IMPORT, "loadSendIconModule()"), {
+  assert.equal(source.split(RELEASE_UPDATE_IMPORT).length, 2, "release-update.mjs dynamic import appears once");
+  assert.doesNotMatch(source, /^import\s+[^;]*["']\.\/release-update\.mjs["']/m);
+  const bootSource = source.replace(/^import .*;\r?\n/gm, "")
+    .replace(SEND_ICON_IMPORT, "loadSendIconModule()")
+    .replace(RELEASE_UPDATE_IMPORT, "loadReleaseUpdate()");
+  vm.runInNewContext(bootSource, {
+    loadReleaseUpdate,
     loadSendIconModule: loadSendIcon ?? (async () => ({
       mountSendIcon(button, opts) {
         calls.sendIcon = { button, opts };
@@ -530,6 +539,28 @@ test("leaving the AIO tab closes quick actions", () => {
   assert.equal(calls.quickActionsClose, 0);
   options.onRoute({ route: "calendar" });
   assert.equal(calls.quickActionsClose, 1);
+});
+
+test("a missing release update module under the v12 worker leaves the shell usable", async () => {
+  const { calls } = bootApp("calendar", null, {
+    loadReleaseUpdate: async () => { throw new TypeError("offline: release update module unavailable"); },
+  });
+  assert.equal(calls.calendarRefresh, 1);
+  await settle();
+});
+
+test("boot initializes release checking once without waiting for the module", async () => {
+  const storage = { getItem: () => null };
+  const initialized = [];
+  let loaded;
+  const { calls } = bootApp("calendar", storage, {
+    loadReleaseUpdate: () => new Promise((resolve) => { loaded = resolve; }),
+  });
+  assert.equal(calls.calendarRefresh, 1);
+  assert.deepEqual(initialized, []);
+  loaded({ initReleaseUpdate: (options) => initialized.push(options.storage) });
+  await settle();
+  assert.deepEqual(initialized, [storage]);
 });
 
 test("calendar tab mounts the calendar module once and refreshes on each entry", () => {
