@@ -17,7 +17,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Test all sixteen files
+      - name: Test all eighteen files
         env:
           AIO_REQUIRE_FULL_SHELL: '1'
-        run: node --test tests/send-icon.test.mjs tests/quick-actions.test.mjs tests/handwriting-pad.test.mjs tests/appearance.test.mjs tests/home.test.mjs tests/router.test.mjs tests/api.test.mjs tests/pwa.test.mjs tests/chat-client.test.mjs tests/chat-history.test.mjs tests/chat-view.test.mjs tests/demo-login.test.mjs tests/graduation-view.test.mjs tests/calendar-view.test.mjs tests/calendar-grid.test.mjs tests/selection-indicator.test.mjs
+        run: node --test tests/android-version.test.mjs tests/release-update.test.mjs tests/send-icon.test.mjs tests/quick-actions.test.mjs tests/handwriting-pad.test.mjs tests/appearance.test.mjs tests/home.test.mjs tests/router.test.mjs tests/api.test.mjs tests/pwa.test.mjs tests/chat-client.test.mjs tests/chat-history.test.mjs tests/chat-view.test.mjs tests/demo-login.test.mjs tests/graduation-view.test.mjs tests/calendar-view.test.mjs tests/calendar-grid.test.mjs tests/selection-indicator.test.mjs
