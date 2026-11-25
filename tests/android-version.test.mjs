@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, readdirSync } from "node:fs";
-import { RELEASE_TAG, applyVersion, maskGradle, resolveVersion } from "../tools/android-version.mjs";
+import { RELEASE_TAG, applyVersion, resolveVersion } from "../tools/android-version.mjs";
 
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
 
@@ -76,12 +76,14 @@ test("applyVersion ignores commented or quoted declarations and counts same-line
   const lineCommented = gradle.replace("        versionCode 1", "        // versionCode 1");
   const sameLine = gradle.replace("minSdkVersion rootProject.ext.minSdkVersion",
     "minSdkVersion 23; versionCode 9");
-  const inlineBlock = gradle.replace("versionCode 1", "/* old */ versionCode 1");
   const quoted = gradle.replace('applicationId "kr.example.aio"', 'applicationId "versionCode 5"')
     .replace("        versionCode 1\n", "");
-  for (const [label, source] of Object.entries({ blockCommented, lineCommented, sameLine, inlineBlock, quoted })) {
+  for (const [label, source] of Object.entries({ blockCommented, lineCommented, sameLine, quoted })) {
     assert.throws(() => applyVersion(source, version), /Expected exactly one version(Code|Name)/, label);
   }
+  // 앞에 붙은 인라인 주석은 선언을 바꾸지 않는다.
+  const inlineBlock = applyVersion(gradle.replace("versionCode 1", "/* old */ versionCode 1"), version);
+  assert.match(inlineBlock, /\/\* old \*\/ versionCode 3\n/);
   // 문자열과 주석 속 단어는 세지 않고, 그 밖의 선언은 그대로 바꾼다.
   const noisy = gradle
     .replace('applicationId "kr.example.aio"', 'applicationId "kr.example.aio" // "versionName" 2')
@@ -93,7 +95,49 @@ test("applyVersion ignores commented or quoted declarations and counts same-line
   assert.match(out, /\/\* versionCode 7 \*\//);
   assert.match(out, /'versionCode'/);
   assert.match(out, /😀\n$/);
-  assert.equal(maskGradle(noisy).length, noisy.length);
+});
+
+test("triple-quoted and interpolated strings never count as declarations", () => {
+  const version = { code: 42, name: "1.2.3" };
+  for (const quote of ["'''", '"""']) {
+    const only = `def sample = ${quote}\nversionCode 1\nversionName "1.0"\n${quote}\n`;
+    assert.throws(() => applyVersion(only, version), /Expected exactly one versionCode/, quote);
+    const notes = `def notes = ${quote}\n        versionCode 5\n        versionName "9.9"\n${quote}\n`;
+    const out = applyVersion(gradle + notes, version);
+    assert.ok(out.endsWith(notes), `${quote} body is untouched`);
+    assert.match(out, /^ {8}versionCode 42$/m);
+    assert.match(out, /^ {8}versionName "1\.2\.3"$/m);
+  }
+  const insideInterpolation = `${gradle}def label = "\${tag("versionCode 5", 'versionName')}"\n`;
+  assert.ok(applyVersion(insideInterpolation, version).endsWith(`def label = "\${tag("versionCode 5", 'versionName')}"\n`));
+  const reference = `${gradle}def label = "build \${versionCode}"\n`;
+  assert.throws(() => applyVersion(reference, version), /Expected exactly one versionCode .* found 2/);
+  const interpolatedName = gradle.replace('versionName "1.0"', 'versionName "v$suffix"');
+  assert.throws(() => applyVersion(interpolatedName, version), /Expected exactly one versionName/);
+});
+
+test("statements separated by semicolons on one line are declarations", () => {
+  const version = { code: 42, name: "1.2.3" };
+  assert.equal(
+    applyVersion('android { defaultConfig { versionCode 1; versionName "1.0" } }', version),
+    'android { defaultConfig { versionCode 42; versionName "1.2.3" } }',
+  );
+  assert.equal(
+    applyVersion("defaultConfig {\n  versionCode = 7 // build\n  versionName = '1.0';\n}\n", version),
+    'defaultConfig {\n  versionCode = 42 // build\n  versionName = "1.2.3";\n}\n',
+  );
+  assert.throws(() => applyVersion('defaultConfig { foo versionCode 1; versionName "1.0" }', version),
+    /Expected exactly one versionCode/);
+  assert.throws(() => applyVersion('defaultConfig { versionCode 1 + 1; versionName "1.0" }', version),
+    /Expected exactly one versionCode/);
+});
+
+test("syntax the tokenizer cannot read fails instead of guessing", () => {
+  const version = { code: 1, name: "1.0.0" };
+  for (const tail of ["def a = '''open\n", 'def a = "open\n', "/* open\n", "def a = $/versionCode 2/$\n",
+    'def a = "${open\n']) {
+    assert.throws(() => applyVersion(gradle + tail, version), /Unsupported or malformed Gradle syntax/, tail);
+  }
 });
 
 test("applyVersion rejects values that would break the Gradle literal", () => {
