@@ -1583,6 +1583,60 @@ html[data-theme="neumorphic"] :is(
   }
 }
 
+.release-update {
+  width: min(400px, calc(100% - 32px));
+  max-height: calc(100dvh - 32px);
+  padding: 20px;
+  overflow: auto;
+  overflow-wrap: anywhere;
+  background: var(--surface-card);
+  color: var(--color-text);
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-card);
+  box-shadow: var(--shadow-card);
+}
+
+.release-update::backdrop {
+  background: rgb(0 0 0 / 35%);
+}
+
+.release-update h2 {
+  margin: 0 0 12px;
+  font-size: 20px;
+}
+
+.release-update p {
+  margin: 0 0 12px;
+}
+
+.release-update-debug {
+  color: var(--color-text-muted);
+}
+
+.release-update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.release-update button {
+  min-width: var(--touch);
+  min-height: var(--touch);
+  padding: 0 12px;
+  border: 1px solid var(--color-control-border);
+  border-radius: var(--radius-control);
+  background: var(--color-surface);
+  color: var(--color-text);
+  font: inherit;
+  cursor: pointer;
+}
+
+.release-update .release-update-download {
+  background: var(--color-school-blue);
+  color: var(--color-on-accent);
+}
+
 /* 선택 표시. 답변 모드 세그먼트(.mode-group)와 아래 탭(.tab-bar)이 컨테이너의 ::before 하나를 움직인다.
    JS가 컨테이너에 --indicator-left·--indicator-right(안쪽 경계에서 표식 왼쪽·오른쪽 끝까지의 px, CSS left·right와
    같은 뜻)와 data-indicator(instant | ready), data-indicator-dir(forward = 오른쪽으로, back = 왼쪽으로)를 넣는다.
